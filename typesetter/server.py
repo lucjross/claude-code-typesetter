@@ -305,6 +305,11 @@ def open_window(url):
         webbrowser.open(url)
 
 
+# The rules in classify.py are written for the fullscreen TUI, so use it
+# whatever the user's own settings say. A later --settings can override it.
+CLAUDE_DEFAULT_ARGS = ["--settings", '{"tui": "fullscreen"}']
+
+
 def parse_args(argv):
     p = argparse.ArgumentParser(
         prog="typeset-claude",
@@ -331,7 +336,7 @@ def parse_args(argv):
 async def main_async(args, claude_args):
     claude = shutil.which(args.claude) or args.claude
     stop = asyncio.Event()
-    session = Session([claude, *claude_args], stop.set)
+    session = Session([claude, *CLAUDE_DEFAULT_ARGS, *claude_args], stop.set)
     token = secrets.token_urlsafe(18)
     settings = {"serif": args.serif, "mono": args.mono,
                 "size": args.size, "serifScale": args.serif_scale,

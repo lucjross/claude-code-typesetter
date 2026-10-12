@@ -88,7 +88,9 @@ The server listens on 127.0.0.1 only and requires a random token in the URL.
 - `typesetter/static/index.html` reflows soft-wrapped prose rows into serif
   paragraphs and keeps everything else on the terminal grid.
 
-The rules are tuned for Claude Code's dark theme.
+The rules are tuned for Claude Code's dark theme and its fullscreen TUI;
+`typeset-claude` starts `claude` with `--settings '{"tui": "fullscreen"}'`
+whatever your own settings say.
 
 ## Tests
 

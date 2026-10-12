@@ -29,6 +29,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from typesetter.classify import _input_box  # noqa: E402
+from typesetter.server import CLAUDE_DEFAULT_ARGS  # noqa: E402
 from typesetter.terminal import Screen, Stream  # noqa: E402
 
 REPLY_PROMPT = (
@@ -153,7 +154,7 @@ def run(out, claude, model):
 
     workdir = Path(tempfile.mkdtemp(prefix="typesetter-capture-"))
     try:
-        s = Session([claude, "--model", model, "--permission-mode", "default"], workdir, 100, 40)
+        s = Session([claude, *CLAUDE_DEFAULT_ARGS, "--model", model, "--permission-mode", "default"], workdir, 100, 40)
         try:
             s.wait_for(lambda: "trust" in s.text().lower() or s.ready(), "startup", 60)
             if not s.ready():
@@ -192,7 +193,7 @@ def run(out, claude, model):
         finally:
             s.close()
 
-        s = Session([claude, "--model", model], workdir, 80, 24)
+        s = Session([claude, *CLAUDE_DEFAULT_ARGS, "--model", model], workdir, 80, 24)
         try:
             s.wait_for(s.ready, "the input box", 60)
             s.wait_idle(1)

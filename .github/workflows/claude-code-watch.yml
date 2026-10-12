@@ -5,7 +5,8 @@
 #               opens an issue mentioning the repo owner, and pushes a branch
 #               of starter tests for anything new
 #   record    - commits the version to .claude-code-version so it isn't
-#               processed again
+#               processed again, and the result to the README badge (and, if
+#               passing, the README's "Tested with" version)
 # Setup: see "Claude Code release watch" in README.md.
 name: Claude Code release watch
 
@@ -61,6 +62,8 @@ jobs:
     needs: check
     if: needs.check.outputs.new == 'true'
     runs-on: ubuntu-latest
+    outputs:
+      result: ${{ steps.result.outputs.result }}
     env:
       VERSION: ${{ needs.check.outputs.version }}
       PREVIOUS: ${{ needs.check.outputs.previous }}
@@ -105,6 +108,15 @@ jobs:
             captures/
             capture-output.txt
             test-output.txt
+      - name: Result
+        id: result
+        if: always()
+        env:
+          PASSED: ${{ steps.capture.outcome == 'success' && steps.test.outcome == 'success' }}
+        run: |
+          if [ "$PASSED" = "true" ]; then result=passing; else result=failing; fi
+          echo "result=$result" >> "$GITHUB_OUTPUT"
+          echo "Claude Code $VERSION: $result"
       - name: Fix with Claude
         if: steps.capture.outcome == 'failure' || steps.test.outcome == 'failure'
         uses: anthropics/claude-code-action@v1
@@ -138,8 +150,9 @@ jobs:
             prompts; at most twice).
 
             When done: create branch claude/compat-${{ env.VERSION }}, commit (not captures/ or the
-            *-output.txt files), push, and open a PR with `gh pr create` describing the root cause, the
-            fix and the test results. If you can't fix it, open an issue with your findings instead.
+            *-output.txt files), and once everything passes also run
+            `python tools/record_status.py ${{ env.VERSION }} passing` and commit that. Push, and open a
+            PR with `gh pr create` describing the root cause, the fix and the test results. If you can't fix it, open an issue with your findings instead.
             Mention @${{ github.repository_owner }} in the PR or issue.
 
   changelog:
@@ -196,14 +209,17 @@ jobs:
     runs-on: ubuntu-latest
     env:
       VERSION: ${{ needs.check.outputs.version }}
+      # Empty if compat didn't finish (e.g. cancelled); then only the version is recorded.
+      RESULT: ${{ needs.compat.outputs.result }}
     steps:
       - uses: actions/checkout@v4
-      - name: Record checked version
+      - name: Record checked version and result
         run: |
           echo "$VERSION" > .claude-code-version
+          [ -z "$RESULT" ] || python3 tools/record_status.py "$VERSION" "$RESULT"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add .claude-code-version
+          git add .claude-code-version README.md .github/badges
           git diff --cached --quiet && exit 0
-          git commit -m "Record Claude Code $VERSION as checked"
+          git commit -m "Record Claude Code $VERSION: ${RESULT:-checked}"
           git push

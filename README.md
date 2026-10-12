@@ -1,5 +1,8 @@
 # claude-code-typesetter
 
+[![CI](https://github.com/lucjross/claude-code-typesetter/actions/workflows/ci.yml/badge.svg)](https://github.com/lucjross/claude-code-typesetter/actions/workflows/ci.yml)
+[![Claude Code](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2Flucjross%2Fclaude-code-typesetter%2Fmain%2F.github%2Fbadges%2Fclaude-code.json)](https://github.com/lucjross/claude-code-typesetter/actions/workflows/claude-code-watch.yml)
+
 Run [Claude Code](https://github.com/anthropics/claude-code) in a browser
 window where prose is set in a serif font and code stays monospace.
 
@@ -13,7 +16,8 @@ the screen is drawn.
 ## Install
 
 Requires Linux or macOS, Python 3.10+, and Claude Code (`claude`) on your
-PATH. It opens in a Chrome, Chromium, Edge or Brave app window if one is
+PATH. Tested with Claude Code <!-- claude-code-version -->2.1.296<!-- /claude-code-version -->;
+new releases are checked daily (see [the release watch](#claude-code-release-watch)). It opens in a Chrome, Chromium, Edge or Brave app window if one is
 installed, otherwise in your default browser. Windows isn't supported
 natively (it needs Unix pseudo-terminals); WSL should work.
 
@@ -115,7 +119,9 @@ version is on npm (compared with `.claude-code-version`), it:
    investigates and opens a fix PR (or an issue if it can't fix it);
 2. has a Claude agent review the release notes for TUI changes, open an issue
    mentioning the repo owner, and push a branch of starter tests for them;
-3. records the version so it isn't processed again.
+3. records the version so it isn't processed again, and updates the Claude
+   Code badge above (and, if the tests passed, the "Tested with" version).
+   A fix PR updates them too once its tests pass.
 
 Setup:
 

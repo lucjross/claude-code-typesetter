@@ -78,7 +78,7 @@ def test_startup():
     title = find(rows, info, "Claude Code v")
     assert title["kind"] == "prose" and title.get("fixed")
     assert any(i.get("input") for i in info), "input box not detected"
-    mode = find(rows, info, "mode")
+    mode = find(rows, info, "mode on")
     assert mode["kind"] == "prose"
 
 
@@ -92,7 +92,7 @@ def test_trust_dialog():
 
 def test_slash_menu():
     rows, info, _ = capture("slash-menu")
-    model = find(rows, info, "/model")
+    model = find(rows, info, "Set the AI model")
     assert model["kind"] == "prose" and model["gutter"] > len("  /model"), \
         "slash menu description not serif"
 

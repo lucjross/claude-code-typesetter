@@ -93,13 +93,13 @@ def test_status_columnar_and_right_aligned():
         "─" * 60,
         "❯ /mo",
         "─" * 60,
-        "  /model        Set the AI model",
+        "  Name      Size      Date",
         "  ⏸ manual mode on · ? for shortcuts",
     ])
     info = classify(buf, 60)
     assert info[1]["kind"] == "prose" and info[1].get("right")
     assert info[3].get("input")                # live input box
-    assert info[5]["kind"] == "mono"           # columnar autocomplete row
+    assert info[5]["kind"] == "mono"           # columnar row
     assert info[6]["kind"] == "prose" and info[6]["gutter"] == 4
 
 
@@ -285,3 +285,24 @@ def test_panel_with_block_rule():
     assert k["Select model"]["kind"] == "prose"
     assert k["❯ 5.  Haiku 5.5 ✔            Fastest for quick answers"]["kind"] == "mono"
     assert k["Enter to set as default · s to use this session only · Esc to cancel"]["kind"] == "prose"
+
+
+def test_slash_menu_below_box_and_status_with_right_indicator():
+    buf = synthetic([
+        "─" * 60,
+        "❯ /mo",
+        "─" * 60,
+        "❯ /model                Set the AI model",
+        "  /morning              Render the user's morning brief",
+        "                        artifact, or set it up as a task",
+    ])
+    info = classify(buf, 60)
+    assert [i["kind"] for i in info[3:]] == ["prose"] * 3
+    assert all(i["gutter"] == 24 for i in info[3:])
+    buf = synthetic([
+        "─" * 60,
+        "❯",
+        "─" * 60,
+        "  ⏸ manual mode on · ? for shortcuts" + " " * 4 + "◐ medium · /effort",
+    ])
+    assert classify(buf, 60)[3]["kind"] == "prose"

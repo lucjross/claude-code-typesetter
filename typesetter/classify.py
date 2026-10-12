@@ -248,7 +248,12 @@ def classify(rows, cols, cursor_y=None):
     box = _input_box(rows)
     status_rows = set(_status_candidates(rows, cols, box))
     # The slash menu opens above the input box; a dialog replaces the box.
-    menu = _slash_menu(rows, box[0]) if box else _dialog(rows)
+    menu = {}
+    if box:
+        # Older versions open the menu above the box, newer ones below it.
+        menu = _slash_menu(rows, box[0]) or _slash_menu_below(rows, box[1])
+    else:
+        menu = _dialog(rows)
     if box:
         for y in _input_rows(rows, box):
             # The cursor lives here, so this skips the cursor-row exclusion.
@@ -279,7 +284,8 @@ def _input_box(rows):
             for b in range(y + 2, len(rows)):
                 if _text(rows[b]).startswith("─"):
                     return y, b
-            return None
+            # No closing rule: this was the box's bottom border followed by
+            # a menu's "❯" row, so keep looking upwards.
     return None
 
 
@@ -322,9 +328,23 @@ def _slash_menu(rows, top):
     while y >= 0 and not _is_blank(rows[y]):
         ys.append(y)
         y -= 1
+    return _menu_cols(rows, list(reversed(ys)))
+
+
+def _slash_menu_below(rows, bottom):
+    """Like _slash_menu, for a menu drawn directly below the input box."""
+    ys = []
+    y = bottom + 1
+    while y < len(rows) and not _is_blank(rows[y]):
+        ys.append(y)
+        y += 1
+    return _menu_cols(rows, ys)
+
+
+def _menu_cols(rows, ys):
     menu = {}
     desc_col = None
-    for y in reversed(ys):
+    for y in ys:
         row = rows[y]
         first = _first_col(row)
         line = _text(row)
@@ -426,6 +446,10 @@ def _status_text_start(row):
     if glyphs > STATUS_MAX_GLYPHS or x >= len(row):
         return None
     rest = _text(row[x:]).strip()
-    if "   " in rest or MONO_CHARS.search(rest) or LOGO_CHARS.search(rest):
-        return None  # columnar (menus, tables) or drawn UI
+    if MONO_CHARS.search(rest) or LOGO_CHARS.search(rest):
+        return None  # drawn UI
+    # One wide gap is the left status and a right-aligned indicator ("◐ medium
+    # · /effort") sharing a row; more than one looks like a table or menu.
+    if len(re.findall(r" {3,}", rest)) > 1:
+        return None
     return x

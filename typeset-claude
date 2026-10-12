@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Launch Claude Code in a browser window with prose in a serif font.
+# Follows symlinks without `readlink -f`, which older macOS lacks.
+src="${BASH_SOURCE[0]}"
+while [ -L "$src" ]; do
+  link_dir="$(cd -P "$(dirname "$src")" && pwd)"
+  src="$(readlink "$src")"
+  case "$src" in /*) ;; *) src="$link_dir/$src" ;; esac
+done
+dir="$(cd -P "$(dirname "$src")" && pwd)"
+PYTHONPATH="$dir${PYTHONPATH:+:$PYTHONPATH}" exec "$dir/.venv/bin/python" -m typesetter.server "$@"

@@ -1,0 +1,377 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Claude Code</title>
+<style>
+  :root {
+    --bg: #1b1b1d;
+    --fg: #e6e6e6;
+    --mono: monospace;
+    --serif: serif;
+    --size: 15px;
+    --serif-size: 16.8px;
+    --line: 19.5px;
+    --pad: 10px;
+  }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--fg); overflow: hidden; }
+  #term {
+    position: fixed; inset: 0; padding: var(--pad);
+    display: flex; flex-direction: column;
+    font-family: var(--mono); font-size: var(--size); line-height: var(--line);
+    font-variant-ligatures: none;
+  }
+  #main { flex: 1 1 auto; min-height: 0; overflow: hidden; }
+  #footer { flex: 0 0 auto; }
+  .row { height: var(--line); white-space: pre; overflow: hidden; }
+  .para { display: flex; align-items: baseline; padding: 1px 0; }
+  .para .gutter { white-space: pre; flex: 0 0 auto; }
+  .para .text {
+    flex: 1 1 auto; min-width: 0; white-space: normal; overflow-wrap: anywhere;
+    font-family: var(--serif); font-size: var(--serif-size); line-height: 1.5;
+    padding-right: 1ch;
+  }
+  .para .text .code { font-family: var(--mono); font-size: calc(var(--size) * 0.94); }
+  /* One-line UI text (header, spinner, status) keeps the terminal row height. */
+  .para.fixed { height: var(--line); padding: 0; overflow: hidden; }
+  .para.fixed .text { line-height: var(--line); }
+  .para.right { justify-content: flex-end; }
+  .para.right .text { flex: 0 0 auto; }
+  .b { font-weight: 700; }
+  .i { font-style: italic; }
+  .s { text-decoration: line-through; }
+  .cursor { outline: 1px solid var(--fg); outline-offset: -1px; }
+  /* What you're typing: keep its spaces; cursor past the last character. */
+  .para.input .text { white-space: pre; }
+  .cursor-end { display: inline-block; width: 0.5em; outline: 1px solid var(--fg); outline-offset: -1px; }
+  /* "Jump to bottom" pill, lifted out of the text it covers. */
+  #pill { position: absolute; display: none; white-space: pre; height: var(--line); }
+  #measure { position: absolute; visibility: hidden; white-space: pre; }
+  #overlay {
+    position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
+    background: #333; color: #fff; padding: 8px 14px; border-radius: 6px;
+    font: 14px system-ui, sans-serif; display: none;
+  }
+</style>
+</head>
+<body>
+<div id="term"><div id="main"></div><div id="footer"></div><div id="pill"></div></div>
+<span id="measure"></span>
+<div id="overlay"></div>
+<script>
+"use strict";
+const PALETTE = {
+  black: "#000000", red: "#cd3131", green: "#0dbc79", brown: "#e5e510",
+  blue: "#2472c8", magenta: "#bc3fbc", cyan: "#11a8cd", white: "#e5e5e5",
+  brightblack: "#666666", brightred: "#f14c4c", brightgreen: "#23d18b",
+  brightbrown: "#f5f543", brightblue: "#3b8eea", brightmagenta: "#d670d6",
+  brightcyan: "#29b8db", brightwhite: "#ffffff",
+};
+const PROSE_FG = new Set(["default", "ffffff", "000000"]);
+const BOLD = 1, ITALIC = 2, REVERSE = 4, STRIKE = 8;
+
+const term = document.getElementById("term");
+const mainEl = document.getElementById("main");
+const footerEl = document.getElementById("footer");
+const overlay = document.getElementById("overlay");
+const root = document.documentElement.style;
+
+const token = new URLSearchParams(location.search).get("token");
+const ws = new WebSocket(`ws://${location.host}/ws?token=${encodeURIComponent(token)}`);
+let cell = { w: 9, h: 19.5 };
+let exited = false;
+let sized = false;
+
+function send(msg) { if (ws.readyState === 1) ws.send(JSON.stringify(msg)); }
+
+function color(c, fallback) {
+  if (c === "default") return fallback;
+  return PALETTE[c] || (/^[0-9a-f]{6}$/i.test(c) ? "#" + c : fallback);
+}
+
+function styleSpan(span, run) {
+  const [, fg, bg, flags] = run;
+  let f = color(fg, null), b = color(bg, null);
+  if (flags & REVERSE) [f, b] = [b || "var(--bg)", f || "var(--fg)"];
+  if (f) span.style.color = f;
+  if (b) span.style.background = b;
+  if (flags & BOLD) span.classList.add("b");
+  if (flags & ITALIC) span.classList.add("i");
+  if (flags & STRIKE) span.classList.add("s");
+}
+
+function appendRuns(el, runs, cursorX) {
+  let col = 0;
+  for (const run of runs) {
+    const chars = Array.from(run[0]);
+    if (cursorX != null && cursorX >= col && cursorX < col + chars.length) {
+      const i = cursorX - col;
+      for (const [text, cls] of [[chars.slice(0, i).join(""), ""], [chars[i], "cursor"],
+                                 [chars.slice(i + 1).join(""), ""]]) {
+        if (!text) continue;
+        const s = document.createElement("span");
+        s.textContent = text;
+        styleSpan(s, run);
+        if (cls) s.classList.add(cls);
+        el.appendChild(s);
+      }
+    } else {
+      const s = document.createElement("span");
+      s.textContent = run[0];
+      styleSpan(s, run);
+      el.appendChild(s);
+    }
+    col += chars.length;
+  }
+}
+
+function appendProse(el, runs, fixed, cursorAt) {
+  const add = (text, run, cls) => {
+    const s = document.createElement("span");
+    s.textContent = text;
+    styleSpan(s, run);
+    if (!fixed && !PROSE_FG.has(run[1])) s.classList.add("code");
+    if (cls) s.classList.add(cls);
+    el.appendChild(s);
+  };
+  let col = 0;
+  for (const run of runs) {
+    const chars = Array.from(run[0]);
+    const i = cursorAt == null ? -1 : cursorAt - col;
+    if (i >= 0 && i < chars.length) {
+      if (i) add(chars.slice(0, i).join(""), run);
+      add(chars[i], run, "cursor");
+      if (i + 1 < chars.length) add(chars.slice(i + 1).join(""), run);
+    } else {
+      add(run[0], run);
+    }
+    col += chars.length;
+  }
+  if (cursorAt != null && cursorAt >= col) {
+    add(" ", ["", "default", "default", 0], "cursor-end");
+  }
+}
+
+function trimLeading(runs) {
+  const out = runs.map(r => r.slice());
+  while (out.length && !out[0][0].trim()) out.shift();
+  if (out.length) out[0][0] = out[0][0].trimStart();
+  return out;
+}
+
+function rowText(line) { return (line.g || []).concat(line.r).map(r => r[0]).join(""); }
+
+function footerStart(lines) {
+  // Input box: a horizontal rule directly above the "❯" prompt row.
+  for (let y = lines.length - 2; y >= 0; y--) {
+    if (rowText(lines[y]).startsWith("─") && /^[❯>]/.test(rowText(lines[y + 1]))) return y;
+  }
+  return lines.length;
+}
+
+// A block is one element: a monospace row, or a prose paragraph made of a
+// row plus the soft-wrapped rows joined to it.
+function toBlocks(lines, from, to, cur) {
+  const blocks = [];
+  for (let y = from; y < to; y++) {
+    const line = lines[y];
+    const prev = blocks[blocks.length - 1];
+    if (line.k === "p" && line.j && prev && prev.para) {
+      prev.lines.push(line);
+    } else if (line.k === "p") {
+      blocks.push({ y, para: true, lines: [line] });
+    } else {
+      blocks.push({ y, para: false, lines: [line], cursorX: cur && cur.y === y ? cur.x : null });
+    }
+  }
+  for (const b of blocks) b.key = JSON.stringify([b.para, b.lines, b.cursorX]);
+  return blocks;
+}
+
+function buildBlock(b) {
+  if (!b.para) {
+    const row = document.createElement("div");
+    row.className = "row";
+    appendRuns(row, b.lines[0].r, b.cursorX);
+    if (!row.textContent) row.textContent = " ";
+    return row;
+  }
+  const first = b.lines[0];
+  const para = document.createElement("div");
+  para.className = "para" + (first.f ? " fixed" : "") + (first.a ? " right" : "")
+    + (first.i ? " input" : "");
+  const bg = color(first.b || "default", null);
+  if (bg) para.style.background = bg;
+  const gutter = document.createElement("span");
+  gutter.className = "gutter";
+  // Right-aligned rows: drop the leading padding, flexbox aligns instead.
+  appendRuns(gutter, first.a ? trimLeading(first.g) : first.g, null);
+  const text = document.createElement("span");
+  text.className = "text";
+  b.lines.forEach((line, i) => {
+    if (i) text.appendChild(document.createTextNode(" "));
+    appendProse(text, line.r, line.f, line.c);
+  });
+  para.append(gutter, text);
+  return para;
+}
+
+// Replace only blocks whose content changed, so an in-progress text
+// selection isn't destroyed by updates elsewhere on screen.
+function reconcile(container, blocks) {
+  const old = container._blocks || [];
+  const nodes = Array.from(container.children);
+  blocks.forEach((b, i) => {
+    let node = nodes[i];
+    if (!node || !old[i] || old[i].key !== b.key) {
+      const fresh = buildBlock(b);
+      if (node) container.replaceChild(fresh, node);
+      else container.appendChild(fresh);
+      node = fresh;
+    }
+    node.dataset.y = b.y;
+  });
+  for (let i = blocks.length; i < nodes.length; i++) nodes[i].remove();
+  container._blocks = blocks;
+}
+
+function render(frame) {
+  const split = footerStart(frame.lines);
+  const cur = frame.cursor.hidden ? null : frame.cursor;
+  reconcile(mainEl, toBlocks(frame.lines, 0, split, cur));
+  reconcile(footerEl, toBlocks(frame.lines, split, frame.lines.length, cur));
+  // If serif text came out taller than the grid, keep the newest part visible.
+  mainEl.scrollTop = mainEl.scrollHeight;
+  renderPill(frame.overlay, split);
+  if (frame.title) document.title = frame.title;
+}
+
+function renderPill(overlay, split) {
+  const pill = document.getElementById("pill");
+  if (!overlay) { pill.style.display = "none"; return; }
+  pill.replaceChildren();
+  appendRuns(pill, overlay.r, null);
+  const pad = parseFloat(getComputedStyle(term).paddingLeft) || 0;
+  pill.style.left = pad + overlay.x * cell.w + "px";
+  // Claude Code puts it on the last conversation row, just above the input
+  // area; anchor it to the bottom of the conversation pane.
+  const anchor = overlay.y < split ? mainEl : footerEl;
+  pill.style.top = anchor.offsetTop + anchor.clientHeight - cell.h + "px";
+  pill.style.display = "block";
+}
+
+function applySettings(s) {
+  root.setProperty("--mono", s.mono);
+  root.setProperty("--serif", s.serif);
+  root.setProperty("--size", s.size + "px");
+  root.setProperty("--serif-size", (s.size * s.serifScale).toFixed(2) + "px");
+  root.setProperty("--line", Math.round(s.size * 1.3) + "px");
+  const m = document.getElementById("measure");
+  m.style.fontFamily = s.mono;
+  m.style.fontSize = s.size + "px";
+  m.textContent = "M".repeat(200);
+  cell = { w: m.getBoundingClientRect().width / 200, h: Math.round(s.size * 1.3) };
+  sized = true;
+  optionAsMeta = !!s.optionAsMeta;
+  sendSize();
+}
+
+function sendSize() {
+  if (!sized) return;
+  const pad = parseFloat(getComputedStyle(term).paddingLeft) || 0;
+  send({
+    t: "resize",
+    cols: Math.floor((innerWidth - 2 * pad) / cell.w),
+    rows: Math.floor((innerHeight - 2 * pad) / cell.h),
+  });
+}
+
+function notice(text) { overlay.textContent = text; overlay.style.display = "block"; }
+
+ws.onmessage = (ev) => {
+  const msg = JSON.parse(ev.data);
+  if (msg.t === "settings") applySettings(msg);
+  else if (msg.t === "frame") {
+    if (mouseDown) pendingFrame = msg;  // drawn on mouseup
+    else render(msg);
+  }
+  else if (msg.t === "exit") { exited = true; notice(`claude exited (${msg.code}). You can close this window.`); }
+};
+ws.onclose = () => { if (!exited) notice("Disconnected from typeset-claude."); exited = true; };
+
+// Hold screen updates while a selection is being dragged.
+let mouseDown = false, pendingFrame = null;
+addEventListener("mousedown", (e) => { if (e.button === 0) mouseDown = true; });
+addEventListener("mouseup", () => {
+  mouseDown = false;
+  if (pendingFrame) { render(pendingFrame); pendingFrame = null; }
+});
+
+let resizeTimer;
+addEventListener("resize", () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(sendSize, 80); });
+addEventListener("focus", () => send({ t: "focus", on: true }));
+addEventListener("blur", () => send({ t: "focus", on: false }));
+
+addEventListener("keydown", (e) => {
+  if (e.isComposing || e.metaKey) return;
+  if (["Shift", "Control", "Alt", "Meta", "CapsLock"].includes(e.key)) return;
+  const lower = e.key.toLowerCase();
+  // Copy when text is selected; otherwise Ctrl+C goes to claude.
+  if (e.ctrlKey && lower === "c" && String(getSelection())) return;
+  // Let the browser fire a paste event for Ctrl+V / Ctrl+Shift+V.
+  if (e.ctrlKey && lower === "v") return;
+  let key = e.key, alt = e.altKey;
+  // macOS: Option+character types a special character ("∫" for Option+B) or
+  // starts an accent (Dead). With --option-as-meta it's Alt+key instead.
+  // Option+Enter/Backspace/arrows stay Alt either way.
+  if (IS_MAC && alt && (key.length === 1 || key === "Dead")) {
+    const base = physicalKey(e);
+    if (optionAsMeta && base) key = base;
+    else alt = false;
+  }
+  if (key === "Dead") return;  // let the browser compose the accented character
+  e.preventDefault();
+  send({ t: "key", key, ctrl: e.ctrlKey, alt, shift: e.shiftKey });
+});
+
+const IS_MAC = /Mac/.test(navigator.platform);
+let optionAsMeta = false;
+const CODE_CHARS = {
+  Minus: "-", Equal: "=", BracketLeft: "[", BracketRight: "]", Semicolon: ";",
+  Quote: "'", Comma: ",", Period: ".", Slash: "/", Backslash: "\\", Backquote: "`", Space: " ",
+};
+
+// The unmodified character for the physical key, ignoring Option.
+function physicalKey(e) {
+  let m = /^Key([A-Z])$/.exec(e.code);
+  if (m) return e.shiftKey ? m[1] : m[1].toLowerCase();
+  m = /^Digit(\d)$/.exec(e.code);
+  if (m) return m[1];
+  return CODE_CHARS[e.code] || null;
+}
+
+addEventListener("paste", (e) => {
+  e.preventDefault();
+  const text = e.clipboardData.getData("text/plain");
+  if (text) send({ t: "paste", text });
+});
+
+let wheelAcc = 0;
+addEventListener("wheel", (e) => {
+  e.preventDefault();
+  wheelAcc += e.deltaMode === 1 ? e.deltaY * cell.h : e.deltaY;
+  const rowEl = e.target.closest && e.target.closest("[data-y]");
+  const y = rowEl ? +rowEl.dataset.y : 0;
+  const x = Math.floor((e.clientX - term.getBoundingClientRect().left) / cell.w);
+  while (Math.abs(wheelAcc) >= cell.h) {
+    const dir = wheelAcc < 0 ? "up" : "down";
+    wheelAcc -= Math.sign(wheelAcc) * cell.h;
+    send({ t: "wheel", dir, x, y });
+  }
+}, { passive: false });
+
+// Ctrl+W can't be intercepted in a Chrome window; ask before closing instead.
+addEventListener("beforeunload", (e) => { if (!exited) { e.preventDefault(); e.returnValue = ""; } });
+</script>
+</body>
+</html>

@@ -1,0 +1,209 @@
+# Daily check for new Claude Code releases. For each new version:
+#   compat    - capture the new TUI, run all tests; on failure a Claude agent
+#               investigates and opens a fix PR (or an issue if it can't fix it)
+#   changelog - a Claude agent reviews the release notes for TUI changes,
+#               opens an issue mentioning the repo owner, and pushes a branch
+#               of starter tests for anything new
+#   record    - commits the version to .claude-code-version so it isn't
+#               processed again
+# Setup: see "Claude Code release watch" in README.md.
+name: Claude Code release watch
+
+on:
+  schedule:
+    - cron: "17 9 * * *"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Claude Code version to check (default: npm latest)"
+        required: false
+      force:
+        description: "Run even if this version was already checked"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: claude-code-watch
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      previous: ${{ steps.v.outputs.previous }}
+      new: ${{ steps.v.outputs.new }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
+          FORCE: ${{ inputs.force }}
+        run: |
+          version="${INPUT_VERSION:-$(npm view @anthropic-ai/claude-code dist-tags.latest)}"
+          previous="$(cat .claude-code-version)"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "previous=$previous" >> "$GITHUB_OUTPUT"
+          if [ "$version" != "$previous" ] || [ "$FORCE" = "true" ]; then
+            echo "new=true" >> "$GITHUB_OUTPUT"
+            echo "Checking Claude Code $version (last checked: $previous)"
+          else
+            echo "new=false" >> "$GITHUB_OUTPUT"
+            echo "Claude Code $version already checked"
+          fi
+
+  compat:
+    needs: check
+    if: needs.check.outputs.new == 'true'
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+      PREVIOUS: ${{ needs.check.outputs.previous }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install -q -r requirements.txt pytest
+          npm install -g "@anthropic-ai/claude-code@$VERSION"
+          claude --version
+      - name: Configure Claude Code for CI
+        # Skip first-run onboarding and pin the dark theme the rules expect.
+        run: |
+          [ -f ~/.claude.json ] || echo '{"hasCompletedOnboarding": true, "theme": "dark"}' > ~/.claude.json
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+      - name: Capture TUI
+        id: capture
+        continue-on-error: true
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: .venv/bin/python tools/capture.py captures 2>&1 | tee capture-output.txt; exit "${PIPESTATUS[0]}"
+      - name: Run tests
+        id: test
+        continue-on-error: true
+        env:
+          CAPTURE_DIR: captures
+        run: .venv/bin/python -m pytest -q 2>&1 | tee test-output.txt; exit "${PIPESTATUS[0]}"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: claude-code-${{ env.VERSION }}-captures
+          path: |
+            captures/
+            capture-output.txt
+            test-output.txt
+      - name: Fix with Claude
+        if: steps.capture.outcome == 'failure' || steps.test.outcome == 'failure'
+        uses: anthropics/claude-code-action@v1
+        env:
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ github.token }}
+          claude_args: >-
+            --max-turns 80
+            --allowedTools "Bash,Read,Edit,Write,Glob,Grep"
+          prompt: |
+            Claude Code ${{ env.VERSION }} was just released (this repo last passed on ${{ env.PREVIOUS }}).
+            This repo, claude-code-typesetter, runs Claude Code's TUI in a pseudo-terminal, emulates it with
+            pyte (typesetter/terminal.py) and decides which screen rows are prose to draw in a serif font
+            (typesetter/classify.py). Read README.md first.
+
+            Its compatibility run failed against the new version:
+            - capture-output.txt: output of tools/capture.py, which drives the new Claude Code through
+              fixed scenarios and saves raw terminal output to captures/ (empty or partial if it failed)
+            - test-output.txt: pytest output; tests/test_live.py checks rules on the captures,
+              the other tests use fixtures in tests/fixtures/
+
+            Find the root cause and fix typesetter/ (or tools/capture.py if the scenario itself broke, e.g. a
+            changed prompt or dialog text) so everything passes. Change a test only when the TUI
+            legitimately changed, and say why in the PR. Rules must stay conservative: anything
+            uncertain renders monospace. To inspect a capture, replay it through typesetter.terminal
+            (see capture() in tests/test_live.py) and print the rows with their colours.
+            Re-run tests with: CAPTURE_DIR=captures .venv/bin/python -m pytest -q
+            You may re-capture with .venv/bin/python tools/capture.py captures (it sends a few Haiku
+            prompts; at most twice).
+
+            When done: create branch claude/compat-${{ env.VERSION }}, commit (not captures/ or the
+            *-output.txt files), push, and open a PR with `gh pr create` describing the root cause, the
+            fix and the test results. If you can't fix it, open an issue with your findings instead.
+            Mention @${{ github.repository_owner }} in the PR or issue.
+
+  changelog:
+    needs: check
+    if: needs.check.outputs.new == 'true'
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+      PREVIOUS: ${{ needs.check.outputs.previous }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Extract changelog entries
+        run: python tools/changelog.py "$PREVIOUS" "$VERSION" > changelog-excerpt.md
+      - name: Configure git
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+      - name: Review with Claude
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          github_token: ${{ github.token }}
+          claude_args: >-
+            --max-turns 60
+            --allowedTools "Bash,Read,Edit,Write,Glob,Grep"
+          prompt: |
+            changelog-excerpt.md has the Claude Code release notes from ${{ env.PREVIOUS }} (exclusive) to
+            ${{ env.VERSION }}. This repo, claude-code-typesetter, re-renders Claude Code's TUI in a browser
+            window with prose in a serif font; read README.md and typesetter/classify.py to see what it
+            recognises (assistant text, prompts, the input box, status lines, slash menu, dialogs, ...).
+
+            1. Pick out the entries that change what the TUI draws or how: new or changed dialogs,
+               menus, prompts, status or footer lines, the input box, scrolling/fullscreen rendering,
+               terminal escape sequences, keybindings, themes. Ignore the rest (hooks, gateways, SDK,
+               MCP, settings without a visible effect, ...).
+            2. If none are relevant, stop without creating anything.
+            3. Otherwise open an issue titled "Claude Code ${{ env.VERSION }}: TUI changes to review" that
+               mentions @${{ github.repository_owner }}, lists each relevant entry and how it could affect
+               the wrapper (what might now render wrongly, or a new element worth making serif).
+            4. Then, as a starting point for the owner, create branch claude/tui-changes-${{ env.VERSION }}
+               with tests describing the behaviour the wrapper should have for those changes, in the
+               style of tests/test_classify.py (synthetic screens). They are expected to fail until the
+               owner implements them; mark each with a comment naming the changelog entry. Don't change
+               typesetter/. Run the suite once to confirm the new tests fail for the expected reason, commit,
+               push, and link the branch in the issue. Don't open a PR.
+
+  record:
+    needs: [check, compat, changelog]
+    if: always() && needs.check.outputs.new == 'true' && needs.check.result == 'success'
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Record checked version
+        run: |
+          echo "$VERSION" > .claude-code-version
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .claude-code-version
+          git diff --cached --quiet && exit 0
+          git commit -m "Record Claude Code $VERSION as checked"
+          git push

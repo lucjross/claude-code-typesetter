@@ -9,6 +9,7 @@ import asyncio
 import fcntl
 import json
 import os
+import re
 import secrets
 import shutil
 import signal
@@ -37,6 +38,16 @@ FOCUS_EVENTS = 1004 << 5
 BRACKETED_PASTE = 2004 << 5
 
 FLAG_BOLD, FLAG_ITALIC, FLAG_REVERSE, FLAG_STRIKE = 1, 2, 4, 8
+
+# What claude prints after leaving the alternate screen (e.g. "Resume this
+# session with: ...") is meant for the user's terminal, so it's kept and
+# printed there on exit.
+ALT_SCREEN_ON, ALT_SCREEN_OFF = b"\x1b[?1049h", b"\x1b[?1049l"
+MAX_EPILOGUE = 64 * 1024
+# Escape sequences other than SGR (colours, dim), plus SI/SO charset shifts.
+NON_SGR = re.compile(r"\x1b(?:\[[?<=>][0-9;:]*[ -/]*[@-~]|\[[0-9;:]*[ -/]*[@-ln-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)|[()][0-9A-Z]|[78=>])|[\x0e\x0f]")
+SGR = re.compile(r"\x1b\[[0-9;]*m")
+RESUME = re.compile(r"claude --resume (\S+)")
 
 
 def runs(cells):
@@ -74,7 +85,10 @@ class Session:
         self.exit_code = None
         self.idle_task = None
         self.window_closed = False
+        self.epilogue = None
+        self._carry = b""
         self.loop = asyncio.get_running_loop()
+        self.exited = asyncio.Event()
 
     # -- process ---------------------------------------------------------
 
@@ -126,12 +140,40 @@ class Session:
         if not data:
             self._on_exit()
             return
+        self._track_epilogue(data)
         self.stream.feed(data)
         self.schedule_frame()
+
+    def _track_epilogue(self, data):
+        buf = self._carry + data
+        on, off = buf.rfind(ALT_SCREEN_ON), buf.rfind(ALT_SCREEN_OFF)
+        if off > on:
+            self.epilogue = bytearray(buf[off + len(ALT_SCREEN_OFF):])
+        elif on > off:
+            self.epilogue = None
+        elif self.epilogue is not None:
+            self.epilogue += data
+            del self.epilogue[:-MAX_EPILOGUE]
+        self._carry = buf[-(len(ALT_SCREEN_OFF) - 1):]
+
+    def exit_text(self, color=True):
+        """What claude printed after leaving the alternate screen."""
+        if not self.epilogue:
+            return ""
+        text = NON_SGR.sub("", self.epilogue.decode("utf-8", "replace")).replace("\r", "")
+        if not color:
+            text = SGR.sub("", text)
+        lines = text.split("\n")
+        while lines and not SGR.sub("", lines[0]).strip():
+            lines.pop(0)
+        while lines and not SGR.sub("", lines[-1]).strip():
+            lines.pop()
+        return "\n".join(lines)
 
     def _on_exit(self):
         self.loop.remove_reader(self.fd)
         self.exit_code = self.proc.wait()
+        self.exited.set()
         self.broadcast({"t": "exit", "code": self.exit_code})
         self.loop.call_later(0.5, self.on_done)
 
@@ -357,10 +399,28 @@ async def main_async(args, claude_args):
         await stop.wait()
     finally:
         session.terminate()
+        if session.proc is not None:
+            try:
+                await asyncio.wait_for(session.exited.wait(), 3)
+            except asyncio.TimeoutError:
+                pass
         await runner.cleanup()
+    print_exit_text(session)
     if session.window_closed:
         return 0
     return session.exit_code or 0
+
+
+def print_exit_text(session):
+    color = sys.stdout.isatty()
+    text = session.exit_text(color)
+    if not text:
+        return
+    print(text)
+    m = RESUME.search(SGR.sub("", text))
+    if m:
+        dim, end = ("\x1b[2m", "\x1b[22m") if color else ("", "")
+        print(f"{dim}Or in typeset-claude:{end}\n{dim}typeset-claude --resume {m.group(1)}{end}")
 
 
 def main():

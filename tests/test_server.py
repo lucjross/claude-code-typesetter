@@ -28,7 +28,7 @@ async def run_session():
     os.chmod(FAKE, 0o755)
     proc = await asyncio.create_subprocess_exec(
         sys.executable, "-m", "typesetter.server", "--no-browser", "--claude", str(FAKE),
-        cwd=ROOT, stderr=asyncio.subprocess.PIPE,
+        cwd=ROOT, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
         env={**os.environ, "PYTHONPATH": str(ROOT)})
     line = (await asyncio.wait_for(proc.stderr.readline(), 15)).decode()
     host, token = re.search(r"http://([^/]+)/\?token=(\S+)", line).groups()
@@ -59,17 +59,21 @@ async def run_session():
             await until(lambda d: d["t"] == "frame" and "got b'\\r'" in screen_text(d), "Enter")
             await ws.send_json({"t": "key", "key": "q"})
             exited = await until(lambda d: d["t"] == "exit", "exit")
-    code = await asyncio.wait_for(proc.wait(), 15)
-    return frame, exited, code
+    stdout, _ = await asyncio.wait_for(proc.communicate(), 15)
+    return frame, exited, proc.returncode, stdout.decode()
 
 
 def test_server_with_fake_claude():
-    frame, exited, code = asyncio.run(run_session())
+    frame, exited, code, stdout = asyncio.run(run_session())
     text = screen_text(frame)
     assert "size 90x30" in text  # the PTY got the browser's size
     hello = next(l for l in frame["lines"] if "Hello" in "".join(r[0] for r in l["r"]))
     assert hello["k"] == "p"  # classified as prose end to end
     assert exited["code"] == 0 and code == 0
+    # What claude prints on leaving the alternate screen reaches the terminal,
+    # without its escape sequences (stdout isn't a TTY here).
+    assert stdout == ("Resume this session with:\nclaude --resume 1234-abcd\n"
+                      "Or in typeset-claude:\ntypeset-claude --resume 1234-abcd\n")
 
 
 def test_unauthorised_websocket_rejected():

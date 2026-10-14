@@ -285,3 +285,34 @@ def test_panel_with_block_rule():
     assert k["Select model"]["kind"] == "prose"
     assert k["❯ 5.  Haiku 5.5 ✔            Fastest for quick answers"]["kind"] == "mono"
     assert k["Enter to set as default · s to use this session only · Esc to cancel"]["kind"] == "prose"
+
+
+# --- Claude Code 2.1.299 (starting points; expected to fail until implemented) ---
+
+
+def test_unrecognized_model_warning_under_banner():
+    # 2.1.299: "Improved the startup warning for an unrecognized model ID: it is
+    # now one short line under the welcome banner with a docs link"
+    buf = synthetic([
+        " ▐▛███▜▌   Claude Code v2.1.299",
+        "▝▜█████▛▘  Model: foo-1 · Claude Pro",
+        "  ▘▘ ▝▝    /tmp/project",
+        "",
+        "⚠ Unrecognized model ID 'foo-1'. See https://docs.example/models",
+    ], cols=80)
+    info = classify(buf, 80)
+    assert info[4]["kind"] == "prose" and info[4]["fixed"]
+    assert info[4]["gutter"] == 2  # warning glyph stays in the gutter
+
+
+def test_update_installed_notice_beside_clear_hint():
+    # 2.1.299: "Fixed the fullscreen 'Update installed' notice being hidden behind
+    # the idle '/clear to save tokens' hint; it now shows beside the hint"
+    buf = synthetic([
+        "─" * 70,
+        "❯ ",
+        "─" * 70,
+        "  ⏵⏵ auto mode on (shift+tab to cycle)       Update installed · restart to apply   /clear to save tokens",
+    ], cols=110)
+    info = classify(buf, 110)
+    assert info[3]["kind"] == "prose" and info[3]["fixed"]

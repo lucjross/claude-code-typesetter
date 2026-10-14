@@ -98,3 +98,18 @@ def test_unauthorised_websocket_rejected():
             proc.terminate()
             await proc.wait()
     assert asyncio.run(attempt())
+
+
+# --- Claude Code 2.1.299 (starting point; expected to fail until implemented) ---
+
+
+def test_short_resume_command_at_exit(capsys):
+    # 2.1.299: "Changed the resume command printed at exit of a worktree session:
+    # it uses -w and -r if the long flags do not fit the terminal"
+    # (exact output shape assumed: "claude -w -r <session id>")
+    from types import SimpleNamespace
+    from typesetter.server import print_exit_text
+
+    session = SimpleNamespace(exit_text=lambda color: "Resume this session with:\nclaude -w -r 1234abcd")
+    print_exit_text(session)
+    assert "typeset-claude --resume 1234abcd" in capsys.readouterr().out

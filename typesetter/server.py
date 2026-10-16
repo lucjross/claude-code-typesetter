@@ -47,7 +47,9 @@ MAX_EPILOGUE = 64 * 1024
 # Escape sequences other than SGR (colours, dim), plus SI/SO charset shifts.
 NON_SGR = re.compile(r"\x1b(?:\[[?<=>][0-9;:]*[ -/]*[@-~]|\[[0-9;:]*[ -/]*[@-ln-~]|\][^\x07\x1b]*(?:\x07|\x1b\\)|[()][0-9A-Z]|[78=>])|[\x0e\x0f]")
 SGR = re.compile(r"\x1b\[[0-9;]*m")
-RESUME = re.compile(r"claude --resume (\S+)")
+# "claude --resume ID", or for a worktree session 'claude --worktree "NAME"
+# --resume ID' ('-w "NAME" -r ID' when that doesn't fit). Group 1 is the args.
+RESUME = re.compile(r'\bclaude ((?:(?:--worktree|-w) "[^"]*" (?:--resume|-r)|--resume) \S+)')
 
 
 def runs(cells):
@@ -420,7 +422,7 @@ def print_exit_text(session):
     m = RESUME.search(SGR.sub("", text))
     if m:
         dim, end = ("\x1b[2m", "\x1b[22m") if color else ("", "")
-        print(f"{dim}Or in typeset-claude:{end}\n{dim}typeset-claude --resume {m.group(1)}{end}")
+        print(f"{dim}Or in typeset-claude:{end}\n{dim}typeset-claude {m.group(1)}{end}")
 
 
 def main():

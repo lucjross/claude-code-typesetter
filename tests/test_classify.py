@@ -287,32 +287,38 @@ def test_panel_with_block_rule():
     assert k["Enter to set as default · s to use this session only · Esc to cancel"]["kind"] == "prose"
 
 
-# --- Claude Code 2.1.299 (starting points; expected to fail until implemented) ---
+
+def test_unrecognized_model_warning():
+    # 2.1.299 moved this warning under the welcome header; it wraps with a
+    # two-column indent and keeps its own (dim) colours.
+    screen, buf = load("unrecognized-model-100x30.raw", 100, 30)
+    info = classify(buf, 100, None if screen.cursor.hidden else screen.cursor.y)
+    k = {text(r).strip(): i for r, i in zip(buf, info) if text(r)}
+    warning = next(t for t in k if t.startswith("⚠ Model"))
+    for line in (warning, "the docs"):
+        assert k[line]["kind"] == "prose" and k[line]["fixed"]
+        assert k[line]["gutter"] == 2
+    assert k[next(t for t in k if t.startswith("▝▝"))]["kind"] == "mono"  # cwd row
 
 
-def test_unrecognized_model_warning_under_banner():
-    # 2.1.299: "Improved the startup warning for an unrecognized model ID: it is
-    # now one short line under the welcome banner with a docs link"
+def test_notice_with_columns_stays_mono():
     buf = synthetic([
-        " ▐▛███▜▌   Claude Code v2.1.299",
-        "▝▜█████▛▘  Model: foo-1 · Claude Pro",
-        "  ▘▘ ▝▝    /tmp/project",
-        "",
-        "⚠ Unrecognized model ID 'foo-1'. See https://docs.example/models",
-    ], cols=80)
-    info = classify(buf, 80)
-    assert info[4]["kind"] == "prose" and info[4]["fixed"]
-    assert info[4]["gutter"] == 2  # warning glyph stays in the gutter
+        "⚠ Two things went wrong:",
+        "  first        second",
+    ])
+    info = classify(buf, 60)
+    assert info[0]["kind"] == "mono" and info[1]["kind"] == "mono"
 
 
-def test_update_installed_notice_beside_clear_hint():
-    # 2.1.299: "Fixed the fullscreen 'Update installed' notice being hidden behind
-    # the idle '/clear to save tokens' hint; it now shows beside the hint"
+def test_update_installed_beside_clear_hint():
+    # 2.1.299 shows "Update installed" beside the idle hint, joined with " · ".
+    # Strings are from the 2.1.301 bundle; the row's placement is assumed.
     buf = synthetic([
-        "─" * 70,
+        "─" * 100,
         "❯ ",
-        "─" * 70,
-        "  ⏵⏵ auto mode on (shift+tab to cycle)       Update installed · restart to apply   /clear to save tokens",
-    ], cols=110)
-    info = classify(buf, 110)
-    assert info[3]["kind"] == "prose" and info[3]["fixed"]
+        "─" * 100,
+        "  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents",
+        "  68k uncached · /clear to start fresh · ✓ Update installed · Restart to apply",
+    ], cols=100)
+    info = classify(buf, 100, cursor_y=1)
+    assert info[4]["kind"] == "prose" and info[4]["fixed"]

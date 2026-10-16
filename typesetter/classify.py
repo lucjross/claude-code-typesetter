@@ -47,6 +47,9 @@ DIALOG_OPTION = re.compile(r"(?:❯\s+)?\d+\.\s+")
 PATH_ONLY = re.compile(r"(?:~|\.{1,2})?/\S*$")
 # A slash-command menu row: optional selection marker, then "/command".
 MENU_COMMAND = re.compile(r"\s*(?:❯\s+)?/\S")
+# Glyph in column 0 that starts a notice, e.g. the startup warning for an
+# unrecognised model ID.
+NOTICE = "⚠"
 
 
 def _text(row):
@@ -204,7 +207,7 @@ def classify(rows, cols, cursor_y=None):
     how many leading cells stay monospace (indent, bullet, list marker);
     `join` means the row is a soft-wrapped continuation of the previous
     prose row; `bg` is the block background ("default" except for user
-    prompts). One-line UI text (welcome header, spinner line, status rows
+    prompts). One-line UI text (welcome header, "⚠" notices, spinner line, status rows
     around the input box) carries "fixed": True, meaning it keeps terminal
     row height and its own colours, and "right": True if right-aligned.
     """
@@ -249,6 +252,7 @@ def classify(rows, cols, cursor_y=None):
     status_rows = set(_status_candidates(rows, cols, box))
     # The slash menu opens above the input box; a dialog replaces the box.
     menu = _slash_menu(rows, box[0]) if box else _dialog(rows)
+    notices = _notices(rows)
     if box:
         for y in _input_rows(rows, box):
             # The cursor lives here, so this skips the cursor-row exclusion.
@@ -260,6 +264,8 @@ def classify(rows, cols, cursor_y=None):
         start = menu.get(y)
         if start is None:
             start = _header_text_start(row)
+        if start is None:
+            start = notices.get(y)
         if start is None and y in status_rows:
             start = _status_text_start(row)
         if start is None:
@@ -382,6 +388,28 @@ def _dialog(rows):
                 or MONO_CHARS.search(body) or LOGO_CHARS.search(body)):
             continue
         gutters[y] = gutter
+    return gutters
+
+
+def _notices(rows):
+    """Map row -> gutter for notices like the startup warning:
+        ⚠ Model "foo-1" isn't recognized · context assumed to be 200k tokens · see
+          the docs
+    Each row is set on its own (a "fixed" row can't hold a wrapped line).
+    A notice with columns or drawn UI in any row stays monospace.
+    """
+    gutters = {}
+    for y, row in enumerate(rows):
+        if row[0].data != NOTICE or (row[1].data or " ").strip():
+            continue
+        ys = [y]
+        while (ys[-1] + 1 < len(rows) and not _is_blank(rows[ys[-1] + 1])
+               and _first_col(rows[ys[-1] + 1]) == BASE_INDENT):
+            ys.append(ys[-1] + 1)
+        bodies = [_text(rows[r][BASE_INDENT:]).strip() for r in ys]
+        if all(b and "   " not in b and not MONO_CHARS.search(b)
+               and not LOGO_CHARS.search(b) for b in bodies):
+            gutters.update((r, BASE_INDENT) for r in ys)
     return gutters
 
 

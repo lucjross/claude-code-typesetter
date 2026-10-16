@@ -9,8 +9,12 @@ import os
 import re
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import aiohttp
+import pytest
+
+from typesetter.server import print_exit_text
 
 ROOT = Path(__file__).resolve().parent.parent
 FAKE = Path(__file__).resolve().parent / "fake_claude.py"
@@ -98,3 +102,16 @@ def test_unauthorised_websocket_rejected():
             proc.terminate()
             await proc.wait()
     assert asyncio.run(attempt())
+
+
+
+@pytest.mark.parametrize("command, hint", [
+    ('claude --worktree "fix-login" --resume 1234-abcd',
+     'typeset-claude --worktree "fix-login" --resume 1234-abcd'),
+    # 2.1.299: short flags when the long ones don't fit the terminal
+    ('claude -w "fix-login" -r 1234-abcd', 'typeset-claude -w "fix-login" -r 1234-abcd'),
+])
+def test_exit_hint_for_worktree_resume(capsys, command, hint):
+    session = SimpleNamespace(exit_text=lambda color: f"Resume this session with:\n{command}")
+    print_exit_text(session)
+    assert capsys.readouterr().out.endswith(f"Or in typeset-claude:\n{hint}\n")

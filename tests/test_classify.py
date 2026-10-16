@@ -285,3 +285,40 @@ def test_panel_with_block_rule():
     assert k["Select model"]["kind"] == "prose"
     assert k["❯ 5.  Haiku 5.5 ✔            Fastest for quick answers"]["kind"] == "mono"
     assert k["Enter to set as default · s to use this session only · Esc to cancel"]["kind"] == "prose"
+
+
+
+def test_unrecognized_model_warning():
+    # 2.1.299 moved this warning under the welcome header; it wraps with a
+    # two-column indent and keeps its own (dim) colours.
+    screen, buf = load("unrecognized-model-100x30.raw", 100, 30)
+    info = classify(buf, 100, None if screen.cursor.hidden else screen.cursor.y)
+    k = {text(r).strip(): i for r, i in zip(buf, info) if text(r)}
+    warning = next(t for t in k if t.startswith("⚠ Model"))
+    for line in (warning, "the docs"):
+        assert k[line]["kind"] == "prose" and k[line]["fixed"]
+        assert k[line]["gutter"] == 2
+    assert k[next(t for t in k if t.startswith("▝▝"))]["kind"] == "mono"  # cwd row
+
+
+def test_notice_with_columns_stays_mono():
+    buf = synthetic([
+        "⚠ Two things went wrong:",
+        "  first        second",
+    ])
+    info = classify(buf, 60)
+    assert info[0]["kind"] == "mono" and info[1]["kind"] == "mono"
+
+
+def test_update_installed_beside_clear_hint():
+    # 2.1.299 shows "Update installed" beside the idle hint, joined with " · ".
+    # Strings are from the 2.1.301 bundle; the row's placement is assumed.
+    buf = synthetic([
+        "─" * 100,
+        "❯ ",
+        "─" * 100,
+        "  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents",
+        "  68k uncached · /clear to start fresh · ✓ Update installed · Restart to apply",
+    ], cols=100)
+    info = classify(buf, 100, cursor_y=1)
+    assert info[4]["kind"] == "prose" and info[4]["fixed"]

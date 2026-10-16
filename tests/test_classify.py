@@ -285,3 +285,17 @@ def test_panel_with_block_rule():
     assert k["Select model"]["kind"] == "prose"
     assert k["❯ 5.  Haiku 5.5 ✔            Fastest for quick answers"]["kind"] == "mono"
     assert k["Enter to set as default · s to use this session only · Esc to cancel"]["kind"] == "prose"
+
+
+def test_viewing_a_subagent():
+    # Viewing a subagent (from /tasks): the input box border carries the
+    # agent's name, and the agent tree (whose breadcrumb 2.1.300 fixed) sits
+    # below the status row. Real 2.1.301 capture.
+    screen, buf = load("agent-view-100x30.raw", 100, 30)
+    info = classify(buf, 100, None if screen.cursor.hidden else screen.cursor.y)
+    k = {text(r).strip(): i for r, i in zip(buf, info) if text(r)}
+    box = next(t for t in k if t.startswith("❯") and "Message @general-purpose" in t)
+    assert k[box].get("input")  # the input box is still found
+    assert k["◯ main"]["kind"] == "prose" and k["◯ main"]["fixed"]
+    agent = next(t for t in k if t.startswith("● general-purpose"))
+    assert k[agent]["kind"] == "mono"  # columnar: name, task, time, tokens

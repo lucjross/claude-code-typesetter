@@ -8,21 +8,57 @@ pyte 0.8.2 gaps this fills:
     version queries such as CSI > 4 ; 2 m) are misparsed: CSI > 4;2 m turns
     on underline, and CSI < u leaks "u" onto the screen. They only configure
     or query the terminal, so they are dropped before pyte sees them.
+  * OSC 8 hyperlinks are ignored. Claude Code uses them for links, so cells
+    drawn inside one carry its URL (Char.link).
 """
 import re
+from typing import NamedTuple, Optional
 
 import pyte
 from pyte.screens import Margins
 
 PRIVATE_CSI = re.compile(rb"\x1b\[[<=>][0-9;:]*[ -/]*[@-~]")
-# An escape sequence cut off at the end of a read.
-PARTIAL_ESC = re.compile(rb"\x1b(?:\[[<=>?]?[0-9;:]*[ -/]*)?$")
+# OSC 8 ; params ; URI, ended by BEL or ST. An empty URI ends the link.
+HYPERLINK = re.compile(rb"\x1b\]8;[^;\x07\x1b]*;([^\x07\x1b]*)(?:\x07|\x1b\\)")
+# An escape sequence cut off at the end of a read (CSI, or OSC before its end).
+PARTIAL_ESC = re.compile(rb"\x1b(?:\[[<=>?]?[0-9;:]*[ -/]*|\][^\x07\x1b]*\x1b?)?$")
+
+
+class Char(NamedTuple):
+    """pyte's Char plus the URL of the hyperlink it was drawn in."""
+    data: str
+    fg: str = "default"
+    bg: str = "default"
+    bold: bool = False
+    italics: bool = False
+    underscore: bool = False
+    strikethrough: bool = False
+    reverse: bool = False
+    blink: bool = False
+    link: Optional[str] = None
 
 
 class Screen(pyte.Screen):
     def __init__(self, cols, rows, reply=None):
         super().__init__(cols, rows)
         self._reply = reply
+
+    @property
+    def default_char(self):
+        return Char(data=" ", reverse=pyte.modes.DECSCNM in self.mode)
+
+    def reset(self):
+        super().reset()
+        self.cursor.attrs = self.default_char
+
+    def set_link(self, url):
+        self.cursor.attrs = self.cursor.attrs._replace(link=url or None)
+
+    def select_graphic_rendition(self, *attrs, **kwargs):
+        # SGR 0 resets colours, not the hyperlink the text is in.
+        link = self.cursor.attrs.link
+        super().select_graphic_rendition(*attrs, **kwargs)
+        self.cursor.attrs = self.cursor.attrs._replace(link=link)
 
     def write_process_input(self, data):
         # Answers to terminal queries (device attributes, cursor position).
@@ -66,4 +102,10 @@ class Stream(pyte.ByteStream):
             self._pending, data = data[m.start():], data[:m.start()]
         else:
             self._pending = b""
-        super().feed(PRIVATE_CSI.sub(b"", data))
+        data = PRIVATE_CSI.sub(b"", data)
+        pos = 0
+        for m in HYPERLINK.finditer(data):
+            super().feed(data[pos:m.start()])
+            self.listener.set_link(m.group(1).decode("utf-8", "replace"))
+            pos = m.end()
+        super().feed(data[pos:])

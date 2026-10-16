@@ -28,12 +28,16 @@ def screen_text(frame):
     return "\n".join(rows)
 
 
-async def run_session():
+async def run_session(opened_log):
     os.chmod(FAKE, 0o755)
+    # webbrowser.open runs $BROWSER; this one records the URL it was given.
+    browser = opened_log.with_suffix(".sh")
+    browser.write_text(f'#!/bin/sh\necho "$1" >> {opened_log}\n')
+    browser.chmod(0o755)
     proc = await asyncio.create_subprocess_exec(
         sys.executable, "-m", "typesetter.server", "--no-browser", "--claude", str(FAKE),
         cwd=ROOT, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-        env={**os.environ, "PYTHONPATH": str(ROOT)})
+        env={**os.environ, "PYTHONPATH": str(ROOT), "BROWSER": f"{browser} %s"})
     line = (await asyncio.wait_for(proc.stderr.readline(), 15)).decode()
     host, token = re.search(r"http://([^/]+)/\?token=(\S+)", line).groups()
     frames = []
@@ -61,18 +65,29 @@ async def run_session():
             await until(lambda d: d["t"] == "frame" and "got b'x'" in screen_text(d), "echo")
             await ws.send_json({"t": "key", "key": "Enter"})
             await until(lambda d: d["t"] == "frame" and "got b'\\r'" in screen_text(d), "Enter")
+            # Only web links are opened, in the default browser.
+            await ws.send_json({"t": "open", "url": "file:///etc/passwd"})
+            await ws.send_json({"t": "open", "url": "https://example.com/docs"})
+            for _ in range(100):
+                if opened_log.exists():
+                    break
+                await asyncio.sleep(0.05)
             await ws.send_json({"t": "key", "key": "q"})
             exited = await until(lambda d: d["t"] == "exit", "exit")
     stdout, _ = await asyncio.wait_for(proc.communicate(), 15)
     return frame, exited, proc.returncode, stdout.decode()
 
 
-def test_server_with_fake_claude():
-    frame, exited, code, stdout = asyncio.run(run_session())
+def test_server_with_fake_claude(tmp_path):
+    opened = tmp_path / "opened.txt"
+    frame, exited, code, stdout = asyncio.run(run_session(opened))
     text = screen_text(frame)
     assert "size 90x30" in text  # the PTY got the browser's size
     hello = next(l for l in frame["lines"] if "Hello" in "".join(r[0] for r in l["r"]))
     assert hello["k"] == "p"  # classified as prose end to end
+    see = next(l for l in frame["lines"] if "the docs" in "".join(r[0] for r in l["r"]))
+    assert [r[0] for r in see["r"] if r[4:] == ["https://example.com/docs"]] == ["the docs"]
+    assert opened.read_text() == "https://example.com/docs\n"
     assert exited["code"] == 0 and code == 0
     # What claude prints on leaving the alternate screen reaches the terminal,
     # without its escape sequences (stdout isn't a TTY here).

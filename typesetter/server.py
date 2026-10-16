@@ -19,6 +19,7 @@ import sys
 import termios
 import webbrowser
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from aiohttp import WSMsgType, web
 
@@ -53,16 +54,24 @@ RESUME = re.compile(r'\bclaude ((?:(?:--worktree|-w) "[^"]*" (?:--resume|-r)|--r
 
 
 def runs(cells):
-    """Collapse cells into [text, fg, bg, flags] runs."""
+    """Collapse cells into [text, fg, bg, flags] runs, plus a fifth element,
+    the URL, for text inside a hyperlink."""
     out = []
     for c in cells:
         flags = (FLAG_BOLD * c.bold | FLAG_ITALIC * c.italics
                  | FLAG_REVERSE * c.reverse | FLAG_STRIKE * c.strikethrough)
-        if out and out[-1][1] == c.fg and out[-1][2] == c.bg and out[-1][3] == flags:
+        link = getattr(c, "link", None)
+        if (out and out[-1][1] == c.fg and out[-1][2] == c.bg and out[-1][3] == flags
+                and (out[-1][4:] or [None])[0] == link):
             out[-1][0] += c.data
         else:
-            out.append([c.data, c.fg, c.bg, flags])
+            out.append([c.data, c.fg, c.bg, flags] + ([link] if link else []))
     return out
+
+
+def openable(url):
+    """Only web links are handed to the browser, not file: or other schemes."""
+    return isinstance(url, str) and urlsplit(url).scheme in ("http", "https")
 
 
 def rstrip_runs(rs, bg="default"):
@@ -218,6 +227,10 @@ class Session:
         elif t == "focus":
             if self.has_mode(FOCUS_EVENTS):
                 self.write(b"\x1b[I" if msg["on"] else b"\x1b[O")
+        elif t == "open":
+            # A clicked link: open it in the default browser, not the app window.
+            if openable(msg.get("url")):
+                self.loop.run_in_executor(None, webbrowser.open, msg["url"])
 
     # -- output ----------------------------------------------------------
 

@@ -42,3 +42,21 @@ def test_private_csi_dropped():
     screen = replay(b"\x1b[>4;2mA\x1b[<uB\x1b[=1uC\x1b[>0qD", cols=10, rows=1)
     assert screen.display[0].strip() == "ABCD"
     assert not any(c.underscore for c in screen.buffer[0].values())
+
+
+def test_hyperlinks():
+    # Claude Code marks links with OSC 8; cells drawn inside one carry the URL.
+    data = (FIXTURES / "unrecognized-model-100x30.raw").read_bytes()
+    for screen in (replay(data, 100, 30), replay(data, 100, 30, chunk=1)):
+        row = [screen.buffer[6][x] for x in range(100)]
+        linked = "".join(c.data for c in row if c.link)
+        assert linked == "the docs"
+        assert {c.link for c in row if c.link} == {
+            "https://code.claude.com/docs/en/model-config"
+            "#correct-the-window-for-a-gateway-or-custom-model-id"}
+
+
+def test_hyperlink_survives_sgr_reset_and_ends():
+    screen = replay(b"a \x1b]8;;https://x.test/\x1b\\b\x1b[0mc\x1b]8;;\x1b\\d")
+    assert [(c.data, c.link) for c in (screen.buffer[0][x] for x in range(5))] == [
+        ("a", None), (" ", None), ("b", "https://x.test/"), ("c", "https://x.test/"), ("d", None)]

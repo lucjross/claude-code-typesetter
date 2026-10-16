@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Stand-in for `claude` in tests/test_server.py: no network, no tokens.
 
-Prints its terminal size and an assistant-style line, then echoes each
-input byte it reads until it gets "q". Then, like claude, it leaves the
-alternate screen and prints a resume hint.
+Prints its terminal size, an assistant-style line and a hyperlink, then
+echoes each input byte it reads until it gets "q". Then, like claude, it
+leaves the alternate screen and prints a resume hint.
 """
 import os
 import sys
@@ -16,6 +16,7 @@ out = (
     "\x1b[?1049h\x1b[H\x1b[2J"
     f"size {cols}x{rows}\r\n"
     "\x1b[38;2;255;255;255m●\x1b[39m Hello from the fake claude, a line of prose.\r\n"
+    "See \x1b]8;id=1;https://example.com/docs\x07the docs\x1b]8;;\x07.\r\n"
 )
 os.write(1, out.encode())
 while True:

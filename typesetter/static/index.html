@@ -40,6 +40,8 @@
   .b { font-weight: 700; }
   .i { font-style: italic; }
   .s { text-decoration: line-through; }
+  a { color: inherit; text-decoration: underline 1px; text-underline-offset: 2px; cursor: pointer; }
+  a.s { text-decoration: underline line-through 1px; }
   .cursor { outline: 1px solid var(--fg); outline-offset: -1px; }
   /* What you're typing: keep its spaces; cursor past the last character. */
   .para.input .text { white-space: pre; }
@@ -100,6 +102,17 @@ function styleSpan(span, run) {
   if (flags & STRIKE) span.classList.add("s");
 }
 
+// A run's element: a link if the text was inside a terminal hyperlink to a
+// web page (the server opens nothing else either).
+function runEl(run) {
+  if (!run[4] || !/^https?:\/\//i.test(run[4])) return document.createElement("span");
+  const a = document.createElement("a");
+  a.href = run[4];
+  a.title = run[4];
+  a.draggable = false;  // so a drag starting on a link still selects text
+  return a;
+}
+
 function appendRuns(el, runs, cursorX) {
   let col = 0;
   for (const run of runs) {
@@ -109,14 +122,14 @@ function appendRuns(el, runs, cursorX) {
       for (const [text, cls] of [[chars.slice(0, i).join(""), ""], [chars[i], "cursor"],
                                  [chars.slice(i + 1).join(""), ""]]) {
         if (!text) continue;
-        const s = document.createElement("span");
+        const s = runEl(run);
         s.textContent = text;
         styleSpan(s, run);
         if (cls) s.classList.add(cls);
         el.appendChild(s);
       }
     } else {
-      const s = document.createElement("span");
+      const s = runEl(run);
       s.textContent = run[0];
       styleSpan(s, run);
       el.appendChild(s);
@@ -127,10 +140,10 @@ function appendRuns(el, runs, cursorX) {
 
 function appendProse(el, runs, fixed, cursorAt) {
   const add = (text, run, cls) => {
-    const s = document.createElement("span");
+    const s = runEl(run);
     s.textContent = text;
     styleSpan(s, run);
-    if (!fixed && !PROSE_FG.has(run[1])) s.classList.add("code");
+    if (!fixed && !PROSE_FG.has(run[1]) && !run[4]) s.classList.add("code");
     if (cls) s.classList.add(cls);
     el.appendChild(s);
   };
@@ -306,6 +319,17 @@ addEventListener("mouseup", () => {
   mouseDown = false;
   if (pendingFrame) { render(pendingFrame); pendingFrame = null; }
 });
+
+// Links open in the default browser (via the server), not in this window.
+function openLink(e) {
+  const a = e.target.closest && e.target.closest("a[href]");
+  if (!a) return;
+  e.preventDefault();
+  if (e.button > 1 || String(getSelection())) return;  // finishing a selection
+  send({ t: "open", url: a.getAttribute("href") });
+}
+addEventListener("click", openLink);
+addEventListener("auxclick", openLink);  // middle click
 
 let resizeTimer;
 addEventListener("resize", () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(sendSize, 80); });

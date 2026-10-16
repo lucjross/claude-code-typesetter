@@ -322,3 +322,14 @@ def test_update_installed_beside_clear_hint():
     ], cols=100)
     info = classify(buf, 100, cursor_y=1)
     assert info[4]["kind"] == "prose" and info[4]["fixed"]
+
+
+def test_links_in_a_reply():
+    # Claude Code draws links (bare URLs and markdown links alike) in bright
+    # blue inside OSC 8 hyperlinks. Real 2.1.301 capture.
+    screen, buf = load("links-100x30.raw", 100, 30)
+    info = classify(buf, 100, None if screen.cursor.hidden else screen.cursor.y)
+    y = next(y for y, r in enumerate(buf) if text(r).startswith("● Bare"))
+    assert info[y]["kind"] == "prose"
+    assert {c.link for c in buf[y] if c.link} == {"https://example.com/bare-url",
+                                                  "https://example.org/named"}

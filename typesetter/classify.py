@@ -99,7 +99,8 @@ def _cells_ok(row, start, bg="default"):
             return False, has_prose
         if c.fg in PROSE_FGS:
             has_prose = True
-        elif c.fg not in INLINE_CODE_FGS:
+        elif c.fg not in INLINE_CODE_FGS and not getattr(c, "link", None):
+            # Links have their own colour (bright blue) but are prose.
             return False, has_prose
     return True, has_prose
 

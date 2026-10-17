@@ -347,3 +347,23 @@ def test_links_in_a_reply():
     assert info[y]["kind"] == "prose"
     assert {c.link for c in buf[y] if c.link} == {"https://example.com/bare-url",
                                                   "https://example.org/named"}
+
+
+# --- Claude Code 2.1.302 -------------------------------------------------
+# Synthetic screen: the layout is assumed from the changelog, not captured.
+
+
+def test_wrapped_backtick_url_is_one_link():
+    # 2.1.302: "URLs written in backticks being clickable only on their first
+    # row when they wrap; the whole URL is now one link". A URL in backticks
+    # (inline-code colour) inside an OSC 8 link that wraps onto the next row:
+    # both rows are prose, the second joins the first, and the link spans both.
+    url = "https://example.com/a/very/long/path/that/wraps"
+    osc = lambda s: f"\x1b]8;;{url}\x1b\\\x1b[38;2;177;185;249m{s}\x1b[39m\x1b]8;;\x1b\\"
+    screen = Screen(40, 2)
+    Stream(screen).feed(("● See " + osc(url[:30]) + "\r\n  " + osc(url[30:])).encode())
+    buf = [[screen.buffer[y][x] for x in range(40)] for y in range(2)]
+    info = classify(buf, 40)
+    assert info[0]["kind"] == "prose" and info[1]["kind"] == "prose"
+    assert info[1]["join"] is True
+    assert {c.link for r in buf for c in r if c.data.strip()} == {url}

@@ -16,7 +16,7 @@ the screen is drawn.
 ## Install
 
 Requires Linux or macOS, Python 3.10+, and Claude Code (`claude`) on your
-PATH. Tested with Claude Code <!-- claude-code-version -->2.1.302<!-- /claude-code-version -->;
+PATH. Tested with Claude Code <!-- claude-code-version -->2.1.303<!-- /claude-code-version -->;
 new releases are checked daily (see [the release watch](#claude-code-release-watch)). It opens in a Chrome, Chromium, Edge or Brave app window if one is
 installed, otherwise in your default browser. Windows isn't supported
 natively (it needs Unix pseudo-terminals); WSL should work.

@@ -347,3 +347,53 @@ def test_links_in_a_reply():
     assert info[y]["kind"] == "prose"
     assert {c.link for c in buf[y] if c.link} == {"https://example.com/bare-url",
                                                   "https://example.org/named"}
+
+
+# --- Claude Code 2.1.306 review (changelog 2.1.304 -> 2.1.306) -------------
+# The screens below are synthetic: no real capture of these 2.1.305 screens
+# exists yet, so wording and placement are assumed from the changelog.
+# Expected to fail until the classifier handles them.
+
+
+def test_usage_warning_fixes():
+    # 2.1.305: "Improved `/usage`: each warning is now a one-line fix that
+    # names its source, and `f` applies the fixes". Each fix is one sentence
+    # of prose; the source (a setting or env var) is code and stays mono.
+    k = kinds([
+        "▔" * 70,
+        "   Usage",
+        "",
+        "   ⚠ Unset CLAUDE_CODE_FOO in ~/.zshrc to stop the extra spend",
+        "   ⚠ Remove the unused rule Bash(*) from .claude/settings.json",
+        "",
+        "   f to apply fixes · Esc to close",
+    ])
+    assert k["Usage"]["kind"] == "prose"
+    for line in ("⚠ Unset CLAUDE_CODE_FOO in ~/.zshrc to stop the extra spend",
+                 "⚠ Remove the unused rule Bash(*) from .claude/settings.json"):
+        assert k[line]["kind"] == "prose" and k[line]["fixed"], line
+        assert k[line]["gutter"] == 5, line  # "⚠ " stays in the gutter
+    assert k["f to apply fixes · Esc to close"]["kind"] == "prose"
+
+
+
+
+def test_artifacts_delete_confirmation():
+    # 2.1.305: "`/artifacts` delete confirmation takes 1 or Enter to keep, 2
+    # to delete, and Esc to cancel". Question and key hint are prose; the
+    # artifact name is a title and stays mono.
+    k = kinds([
+        "─" * 80,
+        " Delete artifact?",
+        " quarterly-report.html",
+        "",
+        " ❯ 1. Keep",
+        "   2. Delete",
+        "",
+        " 1/Enter to keep · 2 to delete · Esc to cancel",
+    ], cols=80)
+    assert k["Delete artifact?"]["kind"] == "prose"
+    assert k["quarterly-report.html"]["kind"] == "mono"
+    assert k["❯ 1. Keep"]["gutter"] == 6
+    assert k["2. Delete"]["kind"] == "prose"
+    assert k["1/Enter to keep · 2 to delete · Esc to cancel"]["kind"] == "prose"

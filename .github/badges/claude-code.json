@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
   "label": "Claude Code",
-  "message": "2.1.304 failing",
-  "color": "red"
+  "message": "2.1.306 passing",
+  "color": "brightgreen"
 }

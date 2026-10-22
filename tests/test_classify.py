@@ -347,3 +347,29 @@ def test_links_in_a_reply():
     assert info[y]["kind"] == "prose"
     assert {c.link for c in buf[y] if c.link} == {"https://example.com/bare-url",
                                                   "https://example.org/named"}
+
+
+# Claude Code 2.1.308 changelog (2.1.307): "Fixed `/permissions` > Recently
+# denied not showing the denied shell command ... approving a row now names
+# the command, not its description". The layout below is a guess; adjust it
+# to a real capture. The command is code, so it must stay monospace, while
+# the surrounding labels and the approval prompt are prose.
+def test_recently_denied_shows_command_mono():
+    k = kinds([
+        "─" * 99,
+        " Recently denied",
+        " Commands auto mode denied. Press enter to approve a row.",
+        "",
+        " ❯ git push --force origin main",
+        "   rm -rf node_modules && npm ci",
+        "",
+        " Approve `git push --force origin main`?",
+        " ❯ 1. Yes",
+        "   2. No",
+    ])
+    assert k["Recently denied"]["kind"] == "prose"
+    assert k["Commands auto mode denied. Press enter to approve a row."]["kind"] == "prose"
+    assert k["❯ git push --force origin main"]["kind"] == "mono"
+    assert k["rm -rf node_modules && npm ci"]["kind"] == "mono"
+    assert k["Approve `git push --force origin main`?"]["kind"] == "prose"
+    assert k["❯ 1. Yes"]["gutter"] == 6

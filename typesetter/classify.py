@@ -42,14 +42,23 @@ STATUS_MAX_GLYPHS = 3
 OVERLAY = re.compile(r"Jump to bottom \(")
 DIALOG_RULE_CHARS = set("─▔")
 DIALOG_RULE_MIN = 20  # rule characters from column 0
-# Dialog option ("❯ 1. Yes", "  2. No") and a row that is just a path.
+# Dialog option ("❯ 1. Yes", "  2. No").
 DIALOG_OPTION = re.compile(r"(?:❯\s+)?\d+\.\s+")
-PATH_ONLY = re.compile(r"(?:~|\.{1,2})?/\S*$")
 # A slash-command menu row: optional selection marker, then "/command".
 MENU_COMMAND = re.compile(r"\s*(?:❯\s+)?/\S")
 # Glyph in column 0 that starts a notice, e.g. the startup warning for an
 # unrecognised model ID.
 NOTICE = "⚠"
+# Marks a message still waiting to be delivered, under the ctrl+o transcript;
+# the full message follows as indented prose.
+WAITING = "⏸"
+# A dialog or notice row that is code: a path after an optional arrow (a
+# symlink target), one filename-like token, or a shell command (a flag,
+# "&&", a pipe or key=value). Code quoted in backticks doesn't count.
+ARROW_PATH = re.compile(r"(?:→\s+)?(?:~|\.{1,2})?/\S*$")
+FILE_TOKEN = re.compile(r"[^\s/]*(?:\w\.\w|[/_=@])\S*$")
+SHELL = re.compile(r"(?:^|\s)--?[A-Za-z]|&&|\|\||\s\|\s|\w=\S")
+BACKTICKS = re.compile(r"`[^`]*`")
 
 
 def _text(row):
@@ -87,6 +96,21 @@ def _is_prompt_start(row):
     The live input box also starts with "❯" but has the default background.
     """
     return len(row) > 2 and row[0].data == PROMPT and row[0].bg != "default"
+
+
+def _looks_like_code(body):
+    if ARROW_PATH.match(body) or FILE_TOKEN.match(body):
+        return True
+    return bool(SHELL.search(BACKTICKS.sub("", body)))
+
+
+def _continues_link(prev, row, start):
+    """True if `row` from `start` carries on the link that ends `prev`, as a
+    URL wrapped onto its own row does."""
+    end = _last_col(prev)
+    link = getattr(row[start], "link", None)
+    return (link is not None and end is not None
+            and getattr(prev[end], "link", None) == link)
 
 
 def _cells_ok(row, start, bg="default"):
@@ -172,7 +196,8 @@ def _classify_group(rows, ys, cols, out, bg):
         bullet_row = i == 0 and row[0].data in (BULLET, PROMPT)
         indent = BASE_INDENT if bullet_row else _first_col(row)
         ok, has_prose = _cells_ok(row, indent, bg)
-        if not ok or not has_prose:
+        if not ok or not (has_prose or (
+                i > 0 and _continues_link(rows[ys[i - 1]], row, indent))):
             return
         m = None if bullet_row else LIST_MARKER.match(_text(row[indent:]))
         if m:
@@ -234,6 +259,9 @@ def classify(rows, cols, cursor_y=None):
                 block_bg = "default"
             elif _is_prompt_start(row):
                 block_bg = row[0].bg
+            elif row[0].data == WAITING:
+                block_bg = "default"  # the marker row itself is status text
+                continue
             else:
                 block_bg = None
             if block_bg is not None:
@@ -357,8 +385,9 @@ def _dialog(rows):
         ╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌╌
          Do you want to proceed?               <- serif
          ❯ 1. Yes                              <- "❯ 1. " stays in the gutter
-    Rows between dashed rules (commands, file contents) and path-only rows
-    stay monospace. Only called when no input box is on screen.
+    Rows between dashed rules (commands, file contents) and rows that look
+    like code (paths, filenames, shell commands) stay monospace. Only
+    called when no input box is on screen.
     """
     start = None
     for y in range(len(rows) - 1, -1, -1):
@@ -384,8 +413,10 @@ def _dialog(rows):
             continue
         m = DIALOG_OPTION.match(_text(row[first:]))
         gutter = first + len(m.group(0)) if m else first
+        if row[gutter].data == NOTICE:
+            gutter += 2  # "⚠ " stays in the gutter, as in _notices
         body = _text(row[gutter:]).strip()
-        if (not body or PATH_ONLY.match(body) or "   " in body
+        if (not body or "   " in body or _looks_like_code(body)
                 or MONO_CHARS.search(body) or LOGO_CHARS.search(body)):
             continue
         gutters[y] = gutter
@@ -397,7 +428,8 @@ def _notices(rows):
         ⚠ Model "foo-1" isn't recognized · context assumed to be 200k tokens · see
           the docs
     Each row is set on its own (a "fixed" row can't hold a wrapped line).
-    A notice with columns or drawn UI in any row stays monospace.
+    A notice with columns or drawn UI in any row stays monospace; a row
+    that looks like code (a command to run) stays monospace on its own.
     """
     gutters = {}
     for y, row in enumerate(rows):
@@ -410,7 +442,8 @@ def _notices(rows):
         bodies = [_text(rows[r][BASE_INDENT:]).strip() for r in ys]
         if all(b and "   " not in b and not MONO_CHARS.search(b)
                and not LOGO_CHARS.search(b) for b in bodies):
-            gutters.update((r, BASE_INDENT) for r in ys)
+            gutters.update((r, BASE_INDENT) for r, b in zip(ys, bodies)
+                           if r == y or not _looks_like_code(b))
     return gutters
 
 
@@ -430,8 +463,14 @@ def _after_gap(row, start):
 def _status_candidates(rows, cols, box):
     """Rows that may hold one-line status text."""
     for y, row in enumerate(rows):
-        if row[0].data in SPINNER_GLYPHS and not (row[1].data or "").strip():
+        if ((row[0].data in SPINNER_GLYPHS or row[0].data == WAITING)
+                and not (row[1].data or "").strip()):
             yield y  # spinner / "Cooked for 3s" line
+            # A long one (the compaction row) wraps onto indented words.
+            while (y + 1 < len(rows) and _first_col(rows[y + 1]) == BASE_INDENT
+                   and (rows[y + 1][BASE_INDENT].data or " ").isalnum()):
+                y += 1
+                yield y
     if box:
         top, bottom = box
         # Above the box only right-aligned rows ("◐ medium · /effort"); the

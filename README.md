@@ -25,6 +25,11 @@ natively (it needs Unix pseudo-terminals); WSL should work.
 curl -fsSL https://raw.githubusercontent.com/lucjross/claude-code-typesetter/main/install.sh | bash
 ```
 
+It installs the [latest release](https://github.com/lucjross/claude-code-typesetter/releases);
+set `TYPESET_CLAUDE_VERSION=0.1.0` (or `main`) to pick another.
+`typeset-claude --version` shows the version, which includes the Claude Code
+version it was tested with, e.g. `0.1.0+cc.2.1.310`.
+
 ## Use
 
 ```sh

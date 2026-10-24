@@ -9,13 +9,17 @@
 # claude-code-typesetter`, or delete those two paths.
 #
 # Environment overrides:
-#   TYPESET_CLAUDE_SOURCE  what to install (default: the main branch archive)
-#   TYPESET_CLAUDE_METHOD  "pipx" or "venv" (default: pipx if available)
+#   TYPESET_CLAUDE_VERSION  release to install, e.g. 0.2.0, or "main" for the
+#                           development branch (default: the latest release)
+#   TYPESET_CLAUDE_SOURCE   anything pip can install; overrides the version
+#   TYPESET_CLAUDE_METHOD   "pipx" or "venv" (default: pipx if available)
 
 set -euo pipefail
 
 main() {
-  local source="${TYPESET_CLAUDE_SOURCE:-https://github.com/lucjross/claude-code-typesetter/archive/refs/heads/main.tar.gz}"
+  local repo="https://github.com/lucjross/claude-code-typesetter"
+  local source="${TYPESET_CLAUDE_SOURCE:-}"
+  local version="${TYPESET_CLAUDE_VERSION:-latest}"
   local data_dir="${XDG_DATA_HOME:-$HOME/.local/share}/claude-code-typesetter"
   local bin_dir="$HOME/.local/bin"
 
@@ -36,6 +40,27 @@ main() {
     fi
   done
   [ -n "$python" ] || die "Python 3.10 or newer is required"
+
+  if [ -z "$source" ]; then
+    if [ "$version" = latest ]; then
+      # /releases/latest redirects to /releases/tag/<tag>, or to /releases if
+      # there are none yet.
+      local url
+      url="$(curl -fsSL -o /dev/null -w '%{url_effective}' "$repo/releases/latest")" ||
+        die "couldn't reach GitHub to find the latest release"
+      case "$url" in
+        */releases/tag/*) version="${url##*/releases/tag/}" ;;
+        *) say "No release found; installing the main branch."; version=main ;;
+      esac
+    fi
+    case "$version" in
+      main) source="$repo/archive/refs/heads/main.tar.gz" ;;
+      *) version="v${version#v}"
+         source="$repo/archive/refs/tags/$version.tar.gz"
+         curl -fsLI -o /dev/null "$source" || die "no release $version (see $repo/releases)" ;;
+    esac
+    say "Installing claude-code-typesetter $version..."
+  fi
 
   local method="${TYPESET_CLAUDE_METHOD:-}"
   if [ -z "$method" ]; then

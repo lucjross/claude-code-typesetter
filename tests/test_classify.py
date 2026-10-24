@@ -314,6 +314,22 @@ def test_unrecognized_model_warning():
     assert k[next(t for t in k if t.startswith("▝▝"))]["kind"] == "mono"  # cwd row
 
 
+def test_recap():
+    # Drawn like Fs() in the 2.1.304 bundle: dim "※", bold "recap: ", then
+    # dim italic text wrapped under a two-column indent.
+    buf = synthetic([
+        "\x1b[2m※ \x1b[1mrecap: \x1b[22;2;3mWe're rebuilding the bot, and everything is pushed. Next,",
+        "\x1b[2;3m  you decide whether I should open a pull request for that branch.\x1b[0m",
+        "",
+        "─" * 80,
+        "❯ ",
+        "─" * 80,
+    ], cols=80)
+    info = classify(buf, 80, cursor_y=4)
+    for y in (0, 1):
+        assert info[y] == {"kind": "prose", "gutter": 2, "join": False, "fixed": True}, y
+
+
 def test_notice_with_columns_stays_mono():
     buf = synthetic([
         "⚠ Two things went wrong:",

@@ -46,9 +46,9 @@ DIALOG_RULE_MIN = 20  # rule characters from column 0
 DIALOG_OPTION = re.compile(r"(?:❯\s+)?\d+\.\s+")
 # A slash-command menu row: optional selection marker, then "/command".
 MENU_COMMAND = re.compile(r"\s*(?:❯\s+)?/\S")
-# Glyph in column 0 that starts a notice, e.g. the startup warning for an
-# unrecognised model ID.
-NOTICE = "⚠"
+# Glyphs in column 0 that start a notice: "⚠" for warnings like an
+# unrecognised model ID, "※" for the recap shown after stepping away.
+NOTICES = set("⚠※")
 # Marks a message still waiting to be delivered, under the ctrl+o transcript;
 # the full message follows as indented prose.
 WAITING = "⏸"
@@ -233,7 +233,7 @@ def classify(rows, cols, cursor_y=None):
     how many leading cells stay monospace (indent, bullet, list marker);
     `join` means the row is a soft-wrapped continuation of the previous
     prose row; `bg` is the block background ("default" except for user
-    prompts). One-line UI text (welcome header, "⚠" notices, spinner line, status rows
+    prompts). One-line UI text (welcome header, "⚠"/"※" notices, spinner line, status rows
     around the input box) carries "fixed": True, meaning it keeps terminal
     row height and its own colours, and "right": True if right-aligned.
     """
@@ -413,7 +413,7 @@ def _dialog(rows):
             continue
         m = DIALOG_OPTION.match(_text(row[first:]))
         gutter = first + len(m.group(0)) if m else first
-        if row[gutter].data == NOTICE:
+        if row[gutter].data in NOTICES:
             gutter += 2  # "⚠ " stays in the gutter, as in _notices
         body = _text(row[gutter:]).strip()
         if (not body or "   " in body or _looks_like_code(body)
@@ -424,16 +424,18 @@ def _dialog(rows):
 
 
 def _notices(rows):
-    """Map row -> gutter for notices like the startup warning:
+    """Map row -> gutter for notices like the startup warning or a recap:
         ⚠ Model "foo-1" isn't recognized · context assumed to be 200k tokens · see
           the docs
+        ※ recap: We're rebuilding the bot, and everything is pushed. Next, you
+          decide whether to open a pull request.
     Each row is set on its own (a "fixed" row can't hold a wrapped line).
     A notice with columns or drawn UI in any row stays monospace; a row
     that looks like code (a command to run) stays monospace on its own.
     """
     gutters = {}
     for y, row in enumerate(rows):
-        if row[0].data != NOTICE or (row[1].data or " ").strip():
+        if row[0].data not in NOTICES or (row[1].data or " ").strip():
             continue
         ys = [y]
         while (ys[-1] + 1 < len(rows) and not _is_blank(rows[ys[-1] + 1])

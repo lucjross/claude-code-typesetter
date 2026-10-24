@@ -18,6 +18,7 @@ import subprocess
 import sys
 import termios
 import webbrowser
+from importlib import metadata
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -372,6 +373,11 @@ def parse_args(argv):
         prog="typeset-claude",
         description="Claude Code with prose in a serif font. "
                     "Unrecognised arguments (and anything after --) go to claude.")
+    try:
+        version = metadata.version("claude-code-typesetter")
+    except metadata.PackageNotFoundError:  # running from a clone
+        version = "dev"
+    p.add_argument("--version", action="version", version=f"%(prog)s {version}")
     p.add_argument("--port", type=int, default=0, help="HTTP port (default: random)")
     p.add_argument("--no-browser", action="store_true", help="print the URL instead of opening a window")
     p.add_argument("--claude", default="claude", help="claude executable")

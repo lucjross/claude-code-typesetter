@@ -1,0 +1,53 @@
+# Cut a release by hand from the Actions tab. Given X.Y.Z, it sets the
+# package version to X.Y.Z+cc.<Claude Code version> (the one in README.md's
+# "Tested with", i.e. the last that passed the release watch), commits that to
+# main, tags it vX.Y.Z and publishes a GitHub release. install.sh installs the
+# latest release.
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release, X.Y.Z (the tested Claude Code version is appended)"
+        required: true
+
+permissions:
+  contents: write
+
+# Shares the release watch's group, since both push to main.
+concurrency:
+  group: claude-code-watch
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ inputs.version }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Test
+        run: |
+          python -m pip install -q -r requirements.txt pytest
+          python -m pytest -q
+      - name: Tag and publish
+        run: |
+          tag="v$VERSION"
+          if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null; then
+            echo "::error::$tag already exists"
+            exit 1
+          fi
+          full="$(python tools/release.py "$VERSION")"
+          cc="${full#*+cc.}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "Release $full"
+          git tag "$tag"
+          git push origin HEAD "$tag"
+          gh release create "$tag" --title "$full" --generate-notes \
+            --notes "Tested with Claude Code $cc."

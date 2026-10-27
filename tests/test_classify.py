@@ -384,6 +384,19 @@ def test_wrapped_backtick_url_is_one_link():
     assert {c.link for r in buf for c in r if c.link} == {url}
 
 
+def test_drawn_glyph_in_inline_code_is_prose():
+    # A message quoting TUI chrome in backticks, like `⎿  Tip: …`, is still
+    # prose; the same glyph outside inline code keeps the row monospace.
+    code = lambda s: f"\x1b[38;2;177;185;249m{s}\x1b[39m"
+    k = kinds([
+        "● Changes in " + code("typesetter/classify.py") + ":",
+        "  1. A " + code("  ⎿  Tip: …") + " row under the spinner is now serif.",
+    ], cols=80)
+    assert [i["kind"] for i in k.values()] == ["prose", "prose"]
+    k = kinds(["● A ⎿ row under the spinner is now serif."], cols=80)
+    assert [i["kind"] for i in k.values()] == ["mono"]
+
+
 # --- Claude Code 2.1.306 review (changelog 2.1.304 -> 2.1.306) -------------
 # The screens below are synthetic: no real capture of these 2.1.305 screens
 # exists yet, so wording and placement are assumed from the changelog.

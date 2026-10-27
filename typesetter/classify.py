@@ -38,6 +38,10 @@ SPINNER_GLYPHS = set("·✢✳✶✻✽*")
 # glyph cells (like "⏵⏵") may precede the words.
 STATUS_ABOVE_BOX = 2
 STATUS_MAX_GLYPHS = 3
+# A card above the input box (the feedback draft card) is indented one column.
+CARD_INDENT = 1
+# A tip under the spinner line, e.g. "  ⎿  Tip: Try the Explanatory output style".
+SPINNER_TIP = re.compile(r"  ⎿  Tip: ")
 # Pill drawn over the conversation while scrolled up; covers part of a row.
 OVERLAY = re.compile(r"Jump to bottom \(")
 DIALOG_RULE_CHARS = set("─▔")
@@ -473,12 +477,17 @@ def _status_candidates(rows, cols, box):
                    and (rows[y + 1][BASE_INDENT].data or " ").isalnum()):
                 y += 1
                 yield y
+            if y + 1 < len(rows) and SPINNER_TIP.match(_text(rows[y + 1])):
+                yield y + 1  # "⎿" stays in the gutter
     if box:
         top, bottom = box
-        # Above the box only right-aligned rows ("◐ medium · /effort"); the
-        # slash-command menu opens there too and is handled by _slash_menu.
+        # Above the box only right-aligned rows ("◐ medium · /effort") and
+        # card rows; the slash-command menu opens there too and is handled by
+        # _slash_menu. A card's shortcut row ("1: Yes   2: No") is columnar,
+        # so _status_text_start leaves it monospace.
         for y in range(max(0, top - STATUS_ABOVE_BOX), top):
-            if _is_right_aligned(rows[y], cols):
+            if (_is_right_aligned(rows[y], cols)
+                    or _first_col(rows[y]) == CARD_INDENT):
                 yield y
         yield from range(bottom + 1, len(rows))
 

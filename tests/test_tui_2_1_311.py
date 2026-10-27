@@ -23,7 +23,7 @@ def test_explanatory_style_tip_under_spinner():
     ])
     tip = k["⎿  Tip: Try the Explanatory output style (/output-style) for more detail"]
     assert tip["kind"] == "prose" and tip["fixed"]
-    assert tip["gutter"] == 6
+    assert tip["gutter"] == 5
 
 
 def test_feedback_card_title_is_serif_and_shortcuts_stay_mono():

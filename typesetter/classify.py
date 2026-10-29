@@ -123,7 +123,10 @@ def _cells_ok(row, start, bg="default"):
     for c in row[start:]:
         if not c.data or not c.data.strip():
             continue
-        if c.bg != bg or c.reverse or MONO_CHARS.match(c.data):
+        if c.bg != bg or c.reverse:
+            return False, has_prose
+        if MONO_CHARS.match(c.data) and c.fg not in INLINE_CODE_FGS:
+            # Drawn UI; inside inline code it's quoted, like `⎿  Tip:`.
             return False, has_prose
         if c.fg in PROSE_FGS:
             has_prose = True

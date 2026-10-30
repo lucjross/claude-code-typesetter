@@ -27,8 +27,8 @@ main() {
   die() { printf 'error: %s\n' "$*" >&2; exit 1; }
 
   case "$(uname -s)" in
-    Linux | Darwin) ;;
-    *) die "only Linux and macOS are supported (on Windows, use WSL)" ;;
+    Linux) ;;
+    *) die "only Linux is supported (on Windows, use WSL)" ;;
   esac
 
   local python=""

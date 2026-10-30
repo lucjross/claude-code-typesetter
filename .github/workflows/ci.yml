@@ -1,5 +1,5 @@
 # Unit tests plus an end-to-end smoke test (real server, fake `claude` in a
-# PTY) on Linux and macOS. Needs no Claude Code install or tokens; the
+# PTY) on Linux. Needs no Claude Code install or tokens; the
 # live checks against real Claude Code run in claude-code-watch.yml.
 name: CI
 
@@ -16,10 +16,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
         python: ["3.10", "3.13"]
-    runs-on: ${{ matrix.os }}
-    name: ${{ matrix.os }} / Python ${{ matrix.python }}
+    runs-on: ubuntu-latest
+    name: Python ${{ matrix.python }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -34,10 +33,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
         method: [pipx, venv]
-    runs-on: ${{ matrix.os }}
-    name: install.sh (${{ matrix.method }}) on ${{ matrix.os }}
+    runs-on: ubuntu-latest
+    name: install.sh (${{ matrix.method }})
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5

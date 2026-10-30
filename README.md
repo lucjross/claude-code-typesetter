@@ -15,7 +15,7 @@ the screen is drawn.
 
 ## Install
 
-Requires Linux or macOS, Python 3.10+, and Claude Code (`claude`) on your
+Requires Linux, Python 3.10+, and Claude Code (`claude`) on your
 PATH. Tested with Claude Code <!-- claude-code-version -->2.1.312<!-- /claude-code-version -->;
 new releases are checked daily (see [the release watch](.github/workflows/claude-code-watch.yml)). It opens in a Chrome, Chromium, Edge or Brave app window if one is
 installed, otherwise in your default browser. Windows isn't supported

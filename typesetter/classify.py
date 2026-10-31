@@ -42,6 +42,9 @@ STATUS_MAX_GLYPHS = 3
 CARD_INDENT = 1
 # A tip under the spinner line, e.g. "  ⎿  Tip: Try the Explanatory output style".
 SPINNER_TIP = re.compile(r"  ⎿  Tip: ")
+# The hint under a queued message (a shaded "❯" row), e.g.
+# "  ctrl+x ctrl+s to send now".
+SEND_NOW = re.compile(r"  \S.* to send now$")
 # Pill drawn over the conversation while scrolled up; covers part of a row.
 OVERLAY = re.compile(r"Jump to bottom \(")
 # A Web Search call; a long query wraps onto rows indented under the "(".
@@ -520,6 +523,10 @@ def _status_candidates(rows, cols, box):
                 yield y
             if y + 1 < len(rows) and SPINNER_TIP.match(_text(rows[y + 1])):
                 yield y + 1  # "⎿" stays in the gutter
+    for y in range(1, len(rows)):
+        if (rows[y - 1][0].bg != "default"
+                and SEND_NOW.match(_text(rows[y]).rstrip())):
+            yield y
     if box:
         top, bottom = box
         # Above the box only right-aligned rows ("◐ medium · /effort") and

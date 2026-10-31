@@ -31,7 +31,19 @@
     font-family: var(--serif); font-size: var(--serif-size); line-height: 1.5;
     padding-right: 1ch;
   }
-  .para .text .code { font-family: var(--mono); font-size: calc(var(--size) * 0.94); }
+  .para .text .code, .grid .code { font-family: var(--mono); font-size: calc(var(--size) * 0.94); }
+  /* A markdown table, rebuilt from the terminal's box-drawing grid. */
+  .grid { display: flex; align-items: flex-start; padding: 4px 0; }
+  .grid .gutter { white-space: pre; flex: 0 0 auto; }
+  .grid table {
+    border-collapse: collapse; font-family: var(--serif); font-size: var(--serif-size);
+    line-height: 1.4; min-width: 0; overflow-wrap: anywhere;
+  }
+  .grid th, .grid td {
+    border: 1px solid color-mix(in srgb, var(--fg) 30%, transparent);
+    padding: 3px 8px; text-align: left; vertical-align: top;
+  }
+  .grid th { font-weight: 700; }
   /* One-line UI text (header, spinner, status) keeps the terminal row height. */
   .para.fixed { height: var(--line); padding: 0; overflow: hidden; }
   .para.fixed .text { line-height: var(--line); }
@@ -191,6 +203,10 @@ function toBlocks(lines, from, to, cur) {
     const prev = blocks[blocks.length - 1];
     if (line.k === "p" && line.j && prev && prev.para) {
       prev.lines.push(line);
+    } else if (line.k === "t" && line.j && prev && prev.table) {
+      prev.lines.push(line);  // drawn by the table's first row
+    } else if (line.k === "t") {
+      blocks.push({ y, table: true, lines: [line] });
     } else if (line.k === "p") {
       blocks.push({ y, para: true, lines: [line] });
     } else {
@@ -201,7 +217,27 @@ function toBlocks(lines, from, to, cur) {
   return blocks;
 }
 
+function buildTable(line) {
+  const wrap = document.createElement("div");
+  wrap.className = "grid";
+  const gutter = document.createElement("span");
+  gutter.className = "gutter";
+  appendRuns(gutter, line.g, null);
+  const table = document.createElement("table");
+  line.t.forEach((cells, i) => {
+    const tr = table.insertRow();
+    for (const runs of cells) {
+      const cell = document.createElement(i ? "td" : "th");
+      appendProse(cell, runs, false, null);
+      tr.appendChild(cell);
+    }
+  });
+  wrap.append(gutter, table);
+  return wrap;
+}
+
 function buildBlock(b) {
+  if (b.table) return buildTable(b.lines[0]);
   if (!b.para) {
     const row = document.createElement("div");
     row.className = "row";

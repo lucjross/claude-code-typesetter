@@ -524,3 +524,25 @@ def test_list_item_continued_from_above_the_screen():
     ], cols=99)
     assert k["of a sentence."] == {"kind": "prose", "gutter": 4, "join": False, "bg": "default"}
     assert k["- Everything else (header, prompt, input box, status rows) resized normally"]["kind"] == "prose"
+
+
+def test_running_tool_activity_row_is_serif_while_blinking():
+    # While a tool runs, its grey "●" blinks; with it off, the blank cell
+    # keeps the grey. Both frames are the same serif row. Colours from 2.1.316.
+    grey = "\x1b[38;2;153;153;153m{}\x1b[39m"
+    for bullet in ("●", " "):
+        k = kinds([
+            "● Here is what I found.",
+            "",
+            grey.format(bullet) + " " + grey.format("Waiting 4 seconds · 2s"),
+            grey.format(" ") + " " + grey.format("⎿  $ sleep 4"),
+            "",
+            "● Bash(ls)",
+            "",
+            "  " + grey.format("Listed 1 directory, ran 2 shell commands"),
+        ], cols=80)
+        row = k[(bullet + " Waiting 4 seconds · 2s").strip()]
+        assert row == {"kind": "prose", "gutter": 2, "join": False, "fixed": True}, bullet
+        assert k["⎿  $ sleep 4"]["kind"] == "mono"
+        assert k["● Bash(ls)"]["kind"] == "mono"
+        assert k["Listed 1 directory, ran 2 shell commands"]["kind"] == "mono"

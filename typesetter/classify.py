@@ -63,6 +63,10 @@ ARROW_PATH = re.compile(r"(?:→\s+)?(?:~|\.{1,2})?/\S*$")
 FILE_TOKEN = re.compile(r"[^\s/]*(?:\w\.\w|[/_=@])\S*$")
 SHELL = re.compile(r"(?:^|\s)--?[A-Za-z]|&&|\|\||\s\|\s|\w=\S")
 BACKTICKS = re.compile(r"`[^`]*`")
+# A labelled value, as in the /design-sync prompt's "Folder:  ~/work/app".
+LABEL = re.compile(r"\w[\w ]*:\s+")
+# A markdown table row drawn as raw pipes ("| a | b |"), as long tables are.
+PIPE_ROW = re.compile(r"\|.*\|$")
 
 
 def _text(row):
@@ -103,7 +107,9 @@ def _is_prompt_start(row):
 
 
 def _looks_like_code(body):
-    if ARROW_PATH.match(body) or FILE_TOKEN.match(body):
+    m = LABEL.match(body)
+    value = body[m.end():] if m else body
+    if any(ARROW_PATH.match(v) or FILE_TOKEN.match(v) for v in (body, value)):
         return True
     return bool(SHELL.search(BACKTICKS.sub("", body)))
 
@@ -206,6 +212,8 @@ def _classify_group(rows, ys, cols, out, bg):
         if not ok or not (has_prose or (
                 i > 0 and _continues_link(rows[ys[i - 1]], row, indent))):
             return
+        if PIPE_ROW.match(_text(row[indent:]).rstrip()):
+            return  # columns must stay aligned
         m = None if bullet_row else LIST_MARKER.match(_text(row[indent:]))
         if m:
             text_start = indent + len(m.group(0))

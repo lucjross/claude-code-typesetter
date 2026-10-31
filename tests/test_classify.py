@@ -492,3 +492,35 @@ def test_web_search_query_and_result_are_prose():
     # Other tools' calls and output stay monospace.
     assert k["● Bash(ls)"]["kind"] == "mono"
     assert k["⎿  README.md"]["kind"] == "mono"
+
+
+def test_scrolled_up_reply_under_pinned_prompt():
+    # Scrolled up, Claude Code pins the conversation's prompt (dim, on the
+    # prompt shading) to the top row; the reply under it has lost its "●"
+    # line and starts partway through a list item. Colours from 2.1.316.
+    k = kinds([
+        "\x1b[38;2;80;80;80;48;2;55;55;55m❯ Without using tools, reply with exactly the markdown\x1b[0m",
+        "    grid to turn into a table, so you see that layout instead, partly serif and",
+        "    of a sentence.",
+        "  - Everything else (header, prompt, input box, status rows) resized normally",
+        "",
+        "  So the typesetter can only show what Claude Code draws at the current terminal",
+        "",
+    ] + ["─" * 99, "❯ ", "─" * 99, "  ⏵⏵ auto mode on"], cols=99)
+    first = k["grid to turn into a table, so you see that layout instead, partly serif and"]
+    assert first["kind"] == "prose" and first["gutter"] == 4
+    assert k["- Everything else (header, prompt, input box, status rows) resized normally"]["kind"] == "prose"
+    assert k["So the typesetter can only show what Claude Code draws at the current terminal"]["kind"] == "prose"
+
+
+def test_list_item_continued_from_above_the_screen():
+    # At the bottom, the screen can start inside a list item whose "- "
+    # marker has scrolled off; its rows are indented past the base indent.
+    k = kinds([
+        "    of a sentence.",
+        "  - Everything else (header, prompt, input box, status rows) resized normally",
+        "",
+        "  So the typesetter can only show what Claude Code draws.",
+    ], cols=99)
+    assert k["of a sentence."] == {"kind": "prose", "gutter": 4, "join": False, "bg": "default"}
+    assert k["- Everything else (header, prompt, input box, status rows) resized normally"]["kind"] == "prose"

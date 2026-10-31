@@ -47,6 +47,8 @@ SPINNER_TIP = re.compile(r"  ⎿  Tip: ")
 SEND_NOW = re.compile(r"  \S.* to send now$")
 # Pill drawn over the conversation while scrolled up; covers part of a row.
 OVERLAY = re.compile(r"Jump to bottom \(")
+# Top-left corner of a markdown table's grid.
+TABLE_TOP = "┌─"
 # A Web Search call; a long query wraps onto rows indented under the "(".
 WEB_SEARCH = "● Web Search("
 WEB_SEARCH_INDENT = len(WEB_SEARCH) - 1
@@ -79,6 +81,12 @@ PIPE_ROW = re.compile(r"\|.*\|$")
 
 def _text(row):
     return "".join(c.data or "" for c in row)
+
+
+def _cols(row):
+    """The row's text with one character per column (a space after a wide
+    character), so string indices are columns."""
+    return "".join(c.data or " " for c in row)
 
 
 def _is_blank(row):
@@ -259,6 +267,9 @@ def classify(rows, cols, cursor_y=None):
     prompts). One-line UI text (welcome header, "⚠"/"※" notices, spinner line, status rows
     around the input box) carries "fixed": True, meaning it keeps terminal
     row height and its own colours, and "right": True if right-aligned.
+    A markdown table drawn as a grid is {"kind": "table", "gutter": n,
+    "spans": [[x0, x1], ...], "rows": [[y, ...], ...]} on its top border
+    row (see _tables) and {"kind": "table", "part": True} on its other rows.
     """
     out = [{"kind": "mono"} for _ in rows]
     block_bg = None  # background of the current text/prompt block, or None
@@ -304,6 +315,13 @@ def classify(rows, cols, cursor_y=None):
     for y, info in searches.items():
         if y != cursor_y:
             out[y] = info
+    for table in _tables(rows):
+        y0, y1 = table["y0"], table["y1"]
+        if cursor_y is None or not y0 <= cursor_y <= y1:
+            out[y0] = {"kind": "table", "gutter": table["x0"],
+                       "spans": table["spans"], "rows": table["rows"]}
+            for y in range(y0 + 1, y1 + 1):
+                out[y] = {"kind": "table", "part": True}
 
     box = _input_box(rows)
     status_rows = set(_status_candidates(rows, cols, box)) | search_results
@@ -360,6 +378,76 @@ def _web_searches(rows):
         if below < len(rows) and _text(rows[below]).startswith(RESULT):
             results.add(below)
     return query, results
+
+
+def _border(row, xs, left, mid, right):
+    """True if `row` draws a table border with junctions at columns `xs`."""
+    for x in range(xs[0], xs[-1] + 1):
+        c = row[x]
+        want = left if x == xs[0] else right if x == xs[-1] else mid if x in xs else "─"
+        if c.data != want or c.fg not in PROSE_FGS or c.bg != "default":
+            return False
+    return True
+
+
+def _tables(rows):
+    """Markdown tables drawn as a box-drawing grid, wholly on screen:
+        ● ┌──────────────┬──────────────────────┐
+          │     Part     │  What it depends on  │
+          ├──────────────┼──────────────────────┤
+          │ Browser      │ A Chrome extension   │
+          │ automation   │ or the desktop app   │
+          └──────────────┴──────────────────────┘
+    Every row must have its "│" (or junctions) at the top border's columns
+    and nothing outside the grid, so other boxes and code don't match.
+    Returns dicts with "y0"/"y1" (border rows), "x0" (the grid's first
+    column), "spans" ([start, end) of each column's cells) and "rows" (the
+    screen rows of each table row, header first).
+    """
+    tables = []
+    y = 0
+    while y < len(rows):
+        row = rows[y]
+        line = _cols(row)
+        x0 = line.find(TABLE_TOP)
+        if x0 < 0 or line[:x0].strip() not in ("", BULLET):
+            y += 1
+            continue
+        x1 = line.find("┐", x0)
+        if x1 < 0 or line[x1 + 1:].strip():
+            y += 1
+            continue
+        xs = [x0] + [x for x in range(x0 + 1, x1) if line[x] == "┬"] + [x1]
+        if not _border(row, xs, "┌", "┬", "┐"):
+            y += 1
+            continue
+        table_rows, current, end = [], [], None
+        for b in range(y + 1, len(rows)):
+            r = rows[b]
+            text = _cols(r)
+            if text[:x0].strip() or text[x1 + 1:].strip():
+                break
+            if _border(r, xs, "└", "┴", "┘"):
+                end = b
+                break
+            if _border(r, xs, "├", "┼", "┤"):
+                if not current:
+                    break
+                table_rows.append(current)
+                current = []
+            elif all(r[x].data == "│" for x in xs) and "│" not in "".join(
+                    text[a + 1:c] for a, c in zip(xs, xs[1:])):
+                current.append(b)
+            else:
+                break
+        if end is None or not current:
+            y += 1
+            continue
+        table_rows.append(current)
+        tables.append({"y0": y, "y1": end, "x0": x0, "rows": table_rows,
+                       "spans": [[a + 1, c] for a, c in zip(xs, xs[1:])]})
+        y = end + 1
+    return tables
 
 
 def _input_box(rows):

@@ -84,6 +84,25 @@ def rstrip_runs(rs, bg="default"):
     return rs
 
 
+def cell_runs(rows, ys, a, b):
+    """Runs for one table cell: columns [a, b) of screen rows `ys`, each
+    line trimmed and joined to the next with a space. A line ending in a
+    hyphen ("Connect-") joins the next without one."""
+    out = []
+    for y in ys:
+        rs = rstrip_runs(runs(rows[y][a:b]))
+        while rs and not rs[0][0].strip() and rs[0][2] == "default":
+            rs.pop(0)
+        if rs:
+            rs[0][0] = rs[0][0].lstrip(" ")
+        if not rs:
+            continue
+        if out and not re.search(r"\w-$", out[-1][0]):
+            out.append([" ", "default", "default", 0])
+        out.extend(rs)
+    return out
+
+
 class Session:
     def __init__(self, claude_argv, on_done):
         self.claude_argv = claude_argv
@@ -274,6 +293,14 @@ class Session:
                 else:
                     line["r"] = rstrip_runs(runs(row[g:]), bg)
                 lines.append(line)
+            elif info["kind"] == "table":
+                if info.get("part"):
+                    lines.append({"k": "t", "j": True, "r": []})
+                else:
+                    lines.append({"k": "t", "j": False, "r": [],
+                                  "g": runs(row[:info["gutter"]]),
+                                  "t": [[cell_runs(rows, ys, a, b) for a, b in info["spans"]]
+                                        for ys in info["rows"]]})
             else:
                 lines.append({"k": "m", "r": runs(row)})
         return {"t": "frame", "cols": cols, "rows": s.lines, "lines": lines, "title": s.title,

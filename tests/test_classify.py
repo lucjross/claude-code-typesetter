@@ -469,3 +469,26 @@ def test_recently_denied_shows_command_mono():
     assert k["rm -rf node_modules && npm ci"]["kind"] == "mono"
     assert k["Approve `git push --force origin main`?"]["kind"] == "prose"
     assert k["❯ 1. Yes"]["gutter"] == 6
+
+
+def test_web_search_query_and_result_are_prose():
+    # Colours as captured from 2.1.316: green bullet, bold "Web Search", the
+    # query in the default colour, and a grey "⎿" + no-break space.
+    call = "\x1b[38;2;78;186;101m●\x1b[39m \x1b[1mWeb Search\x1b[22m("
+    result = "\x1b[38;2;153;153;153m  ⎿  \x1b[39mDid 1 search in 8s"
+    k = kinds([
+        call + '"Spotify Mix transitions Spotify Connect speakers supported devices Sonos',
+        '            Chromecast")',
+        result,
+        "",
+        "● Bash(ls)",
+        "  ⎿  README.md",
+    ], cols=98)
+    first = k['● Web Search("Spotify Mix transitions Spotify Connect speakers supported devices Sonos']
+    assert first == {"kind": "prose", "gutter": 13, "join": False, "bg": "default"}
+    assert k['Chromecast")']["join"] is True
+    done = k["⎿  Did 1 search in 8s"]
+    assert done["kind"] == "prose" and done["fixed"] and done["gutter"] == 5
+    # Other tools' calls and output stay monospace.
+    assert k["● Bash(ls)"]["kind"] == "mono"
+    assert k["⎿  README.md"]["kind"] == "mono"

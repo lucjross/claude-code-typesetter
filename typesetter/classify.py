@@ -122,6 +122,14 @@ def _is_prompt_start(row):
     return len(row) > 2 and row[0].data == PROMPT and row[0].bg != "default"
 
 
+def _is_pinned_prompt(row):
+    """Scrolled up, Claude Code pins a dim copy of the prompt to the top
+    row: "❯" and text in one colour. A submitted prompt's "❯" is grey and
+    its text white."""
+    fgs = {c.fg for c in row if c.data and c.data.strip()}
+    return len(fgs) == 1 and not fgs & PROSE_FGS
+
+
 def _looks_like_code(body):
     m = LABEL.match(body)
     value = body[m.end():] if m else body
@@ -302,6 +310,12 @@ def classify(rows, cols, cursor_y=None):
             elif _is_prompt_start(row):
                 block_bg = row[0].bg
                 prompt_y = y
+                if y == 0 and _is_pinned_prompt(row):
+                    # Set on its own; shaded rows under it are the end of
+                    # the real prompt, whose first line has scrolled off.
+                    continued = next((r for r in range(1, len(rows))
+                                      if not _is_blank(rows[r])), None)
+                    continue
             elif row[0].data == WAITING:
                 block_bg = "default"  # the marker row itself is status text
                 continue
@@ -314,11 +328,15 @@ def classify(rows, cols, cursor_y=None):
         elif block_bg != "default" and row[0].bg != block_bg:
             flush()  # prompt shading ended
             block_bg = None
-            if prompt_y == 0 and not _is_blank(row):
+            if prompt_y == 0:
                 # Scrolled up, the prompt stays pinned to the top row and
-                # the reply under it has lost its "●" line.
-                block_bg, continued = "default", y
-                group.append(y)
+                # the reply under it (after a blank row or not) has lost
+                # its "●" line.
+                block_bg = "default"
+                continued = next((r for r in range(y, len(rows))
+                                  if not _is_blank(rows[r])), None)
+                if not _is_blank(row):
+                    group.append(y)
         elif _is_blank(row):
             flush()
         else:

@@ -214,9 +214,11 @@ def _header_text_start(row):
     return start
 
 
-def _classify_group(rows, ys, cols, out, bg):
+def _classify_group(rows, ys, cols, out, bg, continued=False):
     """`ys` is a run of non-blank rows inside one assistant text block or
-    user prompt; `bg` is the block's background colour."""
+    user prompt; `bg` is the block's background colour. `continued` means
+    the group starts at the top of the screen, inside a block whose first
+    line has scrolled off."""
     infos = []
     prev_text_start = None
     prev_was_list = False
@@ -238,6 +240,8 @@ def _classify_group(rows, ys, cols, out, bg):
             text_start, is_list = indent, False
         elif prev_was_list and indent == prev_text_start:
             text_start, is_list = indent, True  # wrapped list item
+        elif continued and i == 0 and BASE_INDENT < indent < cols // 2:
+            text_start, is_list = indent, True  # its marker scrolled off
         else:
             return  # unexplained indentation: probably code
         infos.append((y, indent, text_start, m is not None))
@@ -277,13 +281,17 @@ def classify(rows, cols, cursor_y=None):
 
     # Rows at the top that are indented continue a block whose first line
     # (bullet or "❯") has scrolled off screen.
-    first = next((r for r in rows if not _is_blank(r)), None)
-    if first is not None and not (first[0].data or " ").strip():
-        block_bg = first[0].bg
+    first = next((y for y, r in enumerate(rows) if not _is_blank(r)), None)
+    continued = None  # the first row of such a block
+    if first is not None and not (rows[first][0].data or " ").strip():
+        block_bg = rows[first][0].bg
+        continued = first
+    prompt_y = None  # where the current prompt block started
 
     def flush():
         if group and (cursor_y is None or cursor_y not in group):
-            _classify_group(rows, group, cols, out, block_bg)
+            _classify_group(rows, group, cols, out, block_bg,
+                            continued=group[0] == continued)
         group.clear()
 
     for y, row in enumerate(rows):
@@ -293,6 +301,7 @@ def classify(rows, cols, cursor_y=None):
                 block_bg = "default"
             elif _is_prompt_start(row):
                 block_bg = row[0].bg
+                prompt_y = y
             elif row[0].data == WAITING:
                 block_bg = "default"  # the marker row itself is status text
                 continue
@@ -305,6 +314,11 @@ def classify(rows, cols, cursor_y=None):
         elif block_bg != "default" and row[0].bg != block_bg:
             flush()  # prompt shading ended
             block_bg = None
+            if prompt_y == 0 and not _is_blank(row):
+                # Scrolled up, the prompt stays pinned to the top row and
+                # the reply under it has lost its "●" line.
+                block_bg, continued = "default", y
+                group.append(y)
         elif _is_blank(row):
             flush()
         else:

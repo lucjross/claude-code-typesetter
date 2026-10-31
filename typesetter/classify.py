@@ -358,6 +358,8 @@ def classify(rows, cols, cursor_y=None):
         if start is None and y in status_rows:
             start = _status_text_start(row)
         if start is None:
+            start = _activity_text_start(row)
+        if start is None:
             continue
         info = {"kind": "prose", "gutter": start, "join": False, "fixed": True}
         if _is_right_aligned(row, cols):
@@ -648,6 +650,24 @@ def _status_candidates(rows, cols, box):
                     or _first_col(rows[y]) == CARD_INDENT):
                 yield y
         yield from range(bottom + 1, len(rows))
+
+
+def _activity_text_start(row):
+    """Column where a tool's activity row starts, or None:
+        ● Waiting 4 seconds · 2s
+        ● Listed 1 directory, ran 2 shell commands
+    The "●" isn't white like a text block's (grey while running, blinking),
+    and the words are a sentence, not a call like "Bash(ls)"."""
+    # With the bullet blinked off, the blank cell keeps its grey.
+    if len(row) < 3 or row[0].data not in (BULLET, " ") or row[0].fg in BULLET_FGS:
+        return None
+    if (row[1].data or " ").strip() or not (row[2].data or " ").isalpha():
+        return None
+    rest = _text(row[2:]).strip()
+    if (TOOL_CALL.match(rest) or "(" in rest.split(" ", 1)[0] or "   " in rest
+            or MONO_CHARS.search(rest) or LOGO_CHARS.search(rest)):
+        return None
+    return 2
 
 
 def _status_text_start(row):

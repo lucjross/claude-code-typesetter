@@ -44,6 +44,11 @@ CARD_INDENT = 1
 SPINNER_TIP = re.compile(r"  ⎿  Tip: ")
 # Pill drawn over the conversation while scrolled up; covers part of a row.
 OVERLAY = re.compile(r"Jump to bottom \(")
+# A Web Search call; a long query wraps onto rows indented under the "(".
+WEB_SEARCH = "● Web Search("
+WEB_SEARCH_INDENT = len(WEB_SEARCH) - 1
+# A tool result row: "  ⎿  Did 1 search in 6s".
+RESULT = "  ⎿"
 DIALOG_RULE_CHARS = set("─▔")
 DIALOG_RULE_MIN = 20  # rule characters from column 0
 # Dialog option ("❯ 1. Yes", "  2. No").
@@ -284,8 +289,13 @@ def classify(rows, cols, cursor_y=None):
             group.append(y)
     flush()
 
+    searches, search_results = _web_searches(rows)
+    for y, info in searches.items():
+        if y != cursor_y:
+            out[y] = info
+
     box = _input_box(rows)
-    status_rows = set(_status_candidates(rows, cols, box))
+    status_rows = set(_status_candidates(rows, cols, box)) | search_results
     # The slash menu opens above the input box; a dialog replaces the box.
     menu = _slash_menu(rows, box[0]) if box else _dialog(rows)
     notices = _notices(rows)
@@ -311,6 +321,34 @@ def classify(rows, cols, cursor_y=None):
             info["right"] = True
         out[y] = info
     return out
+
+
+def _web_searches(rows):
+    """Web Search calls, whose query is a sentence, not code:
+        ● Web Search("Spotify Mix transitions Spotify Connect speakers supported devices
+                    Sonos Chromecast")
+          ⎿  Did 1 search in 6s
+    Returns (query, results): query maps the call's rows to prose info,
+    serif from the opening quote, wrapped rows joined; results are the "⎿"
+    rows under the calls, set like status rows with "⎿" in the gutter.
+    """
+    query, results = {}, set()
+    for y, row in enumerate(rows):
+        if not _text(row).startswith(WEB_SEARCH):
+            continue
+        ys = [y]
+        while (ys[-1] + 1 < len(rows)
+               and _first_col(rows[ys[-1] + 1]) == WEB_SEARCH_INDENT):
+            ys.append(ys[-1] + 1)
+        starts = [len(WEB_SEARCH)] + [WEB_SEARCH_INDENT] * (len(ys) - 1)
+        if not all(_cells_ok(rows[r], s) == (True, True) for r, s in zip(ys, starts)):
+            continue
+        for i, (r, s) in enumerate(zip(ys, starts)):
+            query[r] = {"kind": "prose", "gutter": s, "join": i > 0, "bg": "default"}
+        below = ys[-1] + 1
+        if below < len(rows) and _text(rows[below]).startswith(RESULT):
+            results.add(below)
+    return query, results
 
 
 def _input_box(rows):

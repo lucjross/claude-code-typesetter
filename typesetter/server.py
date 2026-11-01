@@ -104,9 +104,12 @@ def cell_runs(rows, ys, a, b):
 
 
 class Session:
-    def __init__(self, claude_argv, on_done):
+    def __init__(self, claude_argv, on_done, keep_alive=False):
         self.claude_argv = claude_argv
         self.on_done = on_done
+        # Keep claude running with no window connected (--typeset-remote), so a
+        # viewer can come back later, from this machine or another one.
+        self.keep_alive = keep_alive
         self.fd = None
         self.proc = None
         self.screen = None
@@ -322,7 +325,7 @@ class Session:
 
     def detach(self, ws):
         self.clients.discard(ws)
-        if not self.clients:
+        if not self.clients and not self.keep_alive:
             self.idle_task = self.loop.call_later(IDLE_EXIT_SECS, self._idle_exit)
 
     def _idle_exit(self):
@@ -407,6 +410,9 @@ def parse_args(argv):
     p.add_argument("--version", action="version", version=f"%(prog)s {version}")
     p.add_argument("--port", type=int, default=0, help="HTTP port (default: random)")
     p.add_argument("--no-browser", action="store_true", help="print the URL instead of opening a window")
+    p.add_argument("--typeset-remote", action="store_true",
+                   help="for use over an SSH tunnel: don't open a window, keep claude running "
+                        "while no window is connected, and open clicked links in the viewer's browser")
     p.add_argument("--claude", default="claude", help="claude executable")
     p.add_argument("--serif", default='"Charter", "Bitstream Charter", "Iowan Old Style", Georgia, serif')
     p.add_argument("--mono", default='"JetBrains Mono", "DejaVu Sans Mono", "Liberation Mono", monospace')
@@ -426,11 +432,12 @@ def parse_args(argv):
 async def main_async(args, claude_args):
     claude = shutil.which(args.claude) or args.claude
     stop = asyncio.Event()
-    session = Session([claude, *CLAUDE_DEFAULT_ARGS, *claude_args], stop.set)
+    session = Session([claude, *CLAUDE_DEFAULT_ARGS, *claude_args], stop.set,
+                      keep_alive=args.typeset_remote)
     token = secrets.token_urlsafe(18)
     settings = {"serif": args.serif, "mono": args.mono,
                 "size": args.size, "serifScale": args.serif_scale,
-                "optionAsMeta": args.option_as_meta}
+                "optionAsMeta": args.option_as_meta, "remote": args.typeset_remote}
     runner = web.AppRunner(make_app(session, token, settings))
     await runner.setup()
     site = web.TCPSite(runner, "127.0.0.1", args.port)
@@ -438,7 +445,7 @@ async def main_async(args, claude_args):
     port = site._server.sockets[0].getsockname()[1]
     url = f"http://127.0.0.1:{port}/?token={token}"
     print(f"typeset-claude: {url}", file=sys.stderr)
-    if not args.no_browser:
+    if not (args.no_browser or args.typeset_remote):
         open_window(url)
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):

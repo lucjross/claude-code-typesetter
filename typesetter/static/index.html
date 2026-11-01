@@ -322,6 +322,7 @@ function applySettings(s) {
   cell = { w: m.getBoundingClientRect().width / 200, h: Math.round(s.size * 1.3) };
   sized = true;
   optionAsMeta = !!s.optionAsMeta;
+  remote = !!s.remote;
   sendSize();
 }
 
@@ -346,7 +347,11 @@ ws.onmessage = (ev) => {
   }
   else if (msg.t === "exit") { exited = true; notice(`claude exited (${msg.code}). You can close this window.`); }
 };
-ws.onclose = () => { if (!exited) notice("Disconnected from typeset-claude."); exited = true; };
+ws.onclose = () => {
+  if (!exited) notice(remote ? "Disconnected from typeset-claude. Claude is still running: reconnect, then reload this window."
+                             : "Disconnected from typeset-claude.");
+  exited = true;
+};
 
 // Hold screen updates while a selection is being dragged.
 let mouseDown = false, pendingFrame = null;
@@ -357,12 +362,14 @@ addEventListener("mouseup", () => {
 });
 
 // Links open in the default browser (via the server), not in this window.
+// With --typeset-remote the server is on another machine, so the page opens them.
 function openLink(e) {
   const a = e.target.closest && e.target.closest("a[href]");
   if (!a) return;
   e.preventDefault();
   if (e.button > 1 || String(getSelection())) return;  // finishing a selection
-  send({ t: "open", url: a.getAttribute("href") });
+  if (remote) window.open(a.getAttribute("href"), "_blank", "noopener");
+  else send({ t: "open", url: a.getAttribute("href") });
 }
 addEventListener("click", openLink);
 addEventListener("auxclick", openLink);  // middle click
@@ -396,6 +403,7 @@ addEventListener("keydown", (e) => {
 
 const IS_MAC = /Mac/.test(navigator.platform);
 let optionAsMeta = false;
+let remote = false;
 const CODE_CHARS = {
   Minus: "-", Equal: "=", BracketLeft: "[", BracketRight: "]", Semicolon: ";",
   Quote: "'", Comma: ",", Period: ".", Slash: "/", Backslash: "\\", Backquote: "`", Space: " ",

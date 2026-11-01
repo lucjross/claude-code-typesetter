@@ -362,7 +362,7 @@ addEventListener("mouseup", () => {
 });
 
 // Links open in the default browser (via the server), not in this window.
-// With --remote the server is on another machine, so the page opens them.
+// With --typeset-remote the server is on another machine, so the page opens them.
 function openLink(e) {
   const a = e.target.closest && e.target.closest("a[href]");
   if (!a) return;

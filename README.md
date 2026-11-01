@@ -49,13 +49,13 @@ It opens a browser app window. Closing the window ends the session (after a
 | `--no-browser` | print the URL instead of opening a window |
 | `--port N` | random |
 | `--option-as-meta` | off: on macOS, Option+key types special characters (as in Terminal.app); with this flag it sends Alt+key to Claude Code. Option+Enter, Backspace and arrows act as Alt either way. |
-| `--remote` | off: for running on another machine (see below) |
+| `--typeset-remote` | off: for running on another machine (see below) |
 
 The server listens on 127.0.0.1 only and requires a random token in the URL.
 
 ### On another machine, over SSH
 
-`--remote` is for running Claude Code on a server and viewing it from
+`--typeset-remote` is for running Claude Code on a server and viewing it from
 elsewhere. It doesn't open a window, keeps `claude` running while no window
 is connected (so you can close the window, or switch computers, and come
 back later), and opens clicked links in the viewer's browser. Several windows
@@ -63,7 +63,7 @@ can be connected at once. The session ends when `claude` exits.
 
 ```sh
 # on the server, e.g. inside tmux so it outlives your SSH login
-typeset-claude --remote --port 8765
+typeset-claude --typeset-remote --port 8765
 # on your computer
 ssh -N -L 8765:127.0.0.1:8765 server
 # then open the URL it printed (google-chrome --app=URL for an app window)

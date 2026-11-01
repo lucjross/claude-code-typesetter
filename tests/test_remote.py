@@ -1,4 +1,4 @@
-"""--remote: keep claude running with no window connected."""
+"""--typeset-remote: keep claude running with no window connected."""
 import asyncio
 
 from typesetter import server
@@ -26,6 +26,6 @@ def test_remote_keeps_claude_running_with_no_window():
 
 
 def test_remote_flag_is_ours_not_claudes():
-    args, extra = server.parse_args(["--remote", "--resume"])
-    assert args.remote
+    args, extra = server.parse_args(["--typeset-remote", "--resume"])
+    assert args.typeset_remote
     assert extra == ["--resume"]

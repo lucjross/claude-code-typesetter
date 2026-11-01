@@ -328,6 +328,12 @@ class Session:
         if not self.clients and not self.keep_alive:
             self.idle_task = self.loop.call_later(IDLE_EXIT_SECS, self._idle_exit)
 
+    async def close_clients(self):
+        """Close every window's socket (after any queued messages, such as "exit", are sent)."""
+        await asyncio.sleep(0)  # let broadcast()'s pending sends go first
+        await asyncio.gather(*(ws.close() for ws in list(self.clients)),
+                             return_exceptions=True)
+
     def _idle_exit(self):
         # Window closed and not reopened: end the claude session too. This is
         # a normal way to quit, so it doesn't report claude's SIGHUP status.
@@ -459,6 +465,9 @@ async def main_async(args, claude_args):
                 await asyncio.wait_for(session.exited.wait(), 3)
             except asyncio.TimeoutError:
                 pass
+        # Open windows keep their sockets open, and cleanup() waits for those
+        # handlers (up to aiohttp's 60 s shutdown timeout), so close them first.
+        await session.close_clients()
         await runner.cleanup()
     print_exit_text(session)
     if session.window_closed:

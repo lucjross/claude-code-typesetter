@@ -7,6 +7,7 @@ import asyncio
 import json
 import os
 import re
+import signal
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -93,6 +94,43 @@ def test_server_with_fake_claude(tmp_path):
     # without its escape sequences (stdout isn't a TTY here).
     assert stdout == ("Resume this session with:\nclaude --resume 1234-abcd\n"
                       "Or in typeset-claude:\ntypeset-claude --resume 1234-abcd\n")
+
+
+def test_ctrl_c_exits_while_a_window_is_open():
+    """Ctrl+C in the terminal ends the server promptly, even with a window still connected."""
+    async def run():
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable, "-m", "typesetter.server", "--no-browser", "--claude", str(FAKE),
+            cwd=ROOT, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE,
+            env={**os.environ, "PYTHONPATH": str(ROOT)})
+        line = (await asyncio.wait_for(proc.stderr.readline(), 15)).decode()
+        host, token = re.search(r"http://([^/]+)/\?token=(\S+)", line).groups()
+        seen = []
+        async with aiohttp.ClientSession() as http:
+            async with http.ws_connect(f"ws://{host}/ws?token={token}",
+                                       headers={"Origin": f"http://{host}"}) as ws:
+                await ws.send_json({"t": "resize", "cols": 90, "rows": 30})
+                while True:  # wait until claude is running
+                    msg = await asyncio.wait_for(ws.receive(), 15)
+                    if json.loads(msg.data)["t"] == "frame":
+                        break
+                proc.send_signal(signal.SIGINT)
+                try:
+                    code = await asyncio.wait_for(proc.wait(), 5)
+                except asyncio.TimeoutError:
+                    proc.kill()
+                    await proc.wait()
+                    return None, seen
+                # The window is told claude exited, then the socket is closed.
+                while True:
+                    msg = await asyncio.wait_for(ws.receive(), 5)
+                    if msg.type != aiohttp.WSMsgType.TEXT:
+                        break
+                    seen.append(json.loads(msg.data)["t"])
+        return code, seen
+    code, seen = asyncio.run(run())
+    assert code is not None, "server kept running while the window was open"
+    assert "exit" in seen
 
 
 def test_unauthorised_websocket_rejected():

@@ -103,6 +103,14 @@ def cell_runs(rows, ys, a, b):
     return out
 
 
+def child_env():
+    """Environment for Claude Code. It writes to our terminal, not tmux, so
+    inside tmux it needn't limit itself to 256 colours; left to that, its
+    colours don't match the ones classify.py and the page expect."""
+    return dict(os.environ, TERM="xterm-256color", COLORTERM="truecolor",
+                CLAUDE_CODE_TMUX_TRUECOLOR="1")
+
+
 class Session:
     def __init__(self, claude_argv, on_done, keep_alive=False):
         self.claude_argv = claude_argv
@@ -129,7 +137,7 @@ class Session:
     def start(self, cols, rows):
         master, slave = os.openpty()
         self._set_size(master, cols, rows)
-        env = dict(os.environ, TERM="xterm-256color", COLORTERM="truecolor")
+        env = child_env()
         self.proc = subprocess.Popen(
             self.claude_argv, stdin=slave, stdout=slave, stderr=slave,
             env=env, start_new_session=True,

@@ -60,7 +60,8 @@ class Session:
         env = {k: v for k, v in os.environ.items()
                if k in KEEP_ENV or not (k.startswith("CLAUDE_CODE_") or k in
                                         ("CLAUDECODE", "CLAUDE_PID", "CLAUDE_EFFORT"))}
-        env.update(TERM="xterm-256color", COLORTERM="truecolor")
+        env.update(TERM="xterm-256color", COLORTERM="truecolor",
+                   CLAUDE_CODE_TMUX_TRUECOLOR="1")  # as server.child_env()
         self.pid, self.fd = pty.fork()
         if self.pid == 0:
             os.chdir(cwd)

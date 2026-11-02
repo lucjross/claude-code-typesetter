@@ -21,7 +21,12 @@ BULLET = "●"
 PROMPT = "❯"
 BULLET_FGS = {"default", "ffffff", "000000"}
 PROSE_FGS = {"default", "ffffff", "000000"}
-INLINE_CODE_FGS = {"b1b9f9"}
+INLINE_CODE_FG = "b1b9f9"
+# The grey of a finished tool's activity row.
+ACTIVITY_FG = "999999"
+# The channel values of the 256-colour palette's colour cube.
+CUBE_LEVELS = (0, 95, 135, 175, 215, 255)
+HEX_FG = re.compile(r"[0-9a-f]{6}$")
 BASE_INDENT = 2
 # Right-margin slack when deciding whether a row was soft-wrapped.
 WRAP_SLACK = 4
@@ -77,6 +82,32 @@ BACKTICKS = re.compile(r"`[^`]*`")
 LABEL = re.compile(r"\w[\w ]*:\s+")
 # A markdown table row drawn as raw pipes ("| a | b |"), as long tables are.
 PIPE_ROW = re.compile(r"\|.*\|$")
+
+
+def _to_256(fg):
+    """The 256-colour palette index for a hex colour, or None for a named one.
+
+    Uses the rounding Claude Code's downgrade appears to use when limited to
+    256 colours (which isn't the nearest colour: b1b9f9 becomes afd7ff, not
+    afafff). A colour already in the palette keeps its own index; the rounding
+    alone would move some of them, such as 87d7ff onto afd7ff.
+    """
+    if not HEX_FG.match(fg):
+        return None
+    r, g, b = (int(fg[i:i + 2], 16) for i in (0, 2, 4))
+    if all(v in CUBE_LEVELS for v in (r, g, b)):
+        return 16 + 36 * CUBE_LEVELS.index(r) + 6 * CUBE_LEVELS.index(g) + CUBE_LEVELS.index(b)
+    if r == g == b and r <= 238 and (r - 8) % 10 == 0:
+        return 232 + (r - 8) // 10
+    if r >> 4 == g >> 4 == b >> 4:
+        return 16 if r < 8 else 231 if r > 248 else 232 + round((r - 8) / 247 * 24)
+    return 16 + 36 * round(r / 51) + 6 * round(g / 51) + round(b / 51)
+
+
+def _fg_matches(fg, want):
+    """An exact match, or failing that the same 256-colour palette entry, so
+    a colour Claude Code has downgraded still matches."""
+    return fg == want or (_to_256(fg) is not None and _to_256(fg) == _to_256(want))
 
 
 def _text(row):
@@ -155,12 +186,13 @@ def _cells_ok(row, start, bg="default"):
             continue
         if c.bg != bg or c.reverse:
             return False, has_prose
-        if MONO_CHARS.match(c.data) and c.fg not in INLINE_CODE_FGS:
+        inline_code = _fg_matches(c.fg, INLINE_CODE_FG)
+        if MONO_CHARS.match(c.data) and not inline_code:
             # Drawn UI; inside inline code it's quoted, like `⎿  Tip:`.
             return False, has_prose
         if c.fg in PROSE_FGS:
             has_prose = True
-        elif c.fg not in INLINE_CODE_FGS and not getattr(c, "link", None):
+        elif not inline_code and not getattr(c, "link", None):
             # Links have their own colour (bright blue) but are prose.
             return False, has_prose
     return True, has_prose
@@ -230,24 +262,36 @@ def _classify_group(rows, ys, cols, out, bg, continued=False):
     infos = []
     prev_text_start = None
     prev_was_list = False
+    in_code = False  # inside code nested in the current list item
     for i, y in enumerate(ys):
         row = rows[y]
         bullet_row = i == 0 and row[0].data in (BULLET, PROMPT)
         indent = BASE_INDENT if bullet_row else _first_col(row)
         ok, has_prose = _cells_ok(row, indent, bg)
-        if not ok or not (has_prose or (
-                i > 0 and _continues_link(rows[ys[i - 1]], row, indent))):
-            return
-        if PIPE_ROW.match(_text(row[indent:]).rstrip()):
-            return  # columns must stay aligned
+        clean = (ok and (has_prose or (
+                     i > 0 and _continues_link(rows[ys[i - 1]], row, indent)))
+                 # A row of pipes is a table: columns must stay aligned.
+                 and not PIPE_ROW.match(_text(row[indent:]).rstrip()))
         m = None if bullet_row else LIST_MARKER.match(_text(row[indent:]))
         if m:
+            if not clean:
+                return  # a code block with "- " lines, not a list
             text_start = indent + len(m.group(0))
-            is_list = True
+            is_list, in_code = True, False
+        elif in_code:
+            continue
+        elif prev_was_list:
+            # A list has no blank rows around code nested in it, which is
+            # drawn at the base indent. Only a wrapped row lines up with the
+            # item's text, so anything else is code up to the next marker.
+            if not clean or indent != prev_text_start:
+                in_code = True
+                continue
+            text_start, is_list = indent, True  # wrapped list item
+        elif not clean:
+            return
         elif indent == BASE_INDENT:
             text_start, is_list = indent, False
-        elif prev_was_list and indent == prev_text_start:
-            text_start, is_list = indent, True  # wrapped list item
         elif continued and i == 0 and BASE_INDENT < indent < cols // 2:
             text_start, is_list = indent, True  # its marker scrolled off
         else:
@@ -674,14 +718,21 @@ def _activity_text_start(row):
     """Column where a tool's activity row starts, or None:
         ● Waiting 4 seconds · 2s
         ● Listed 1 directory, ran 2 shell commands
+          Read 1 file, ran 1 shell command
     The "●" isn't white like a text block's (grey while running, blinking),
-    and the words are a sentence, not a call like "Bash(ls)"."""
-    # With the bullet blinked off, the blank cell keeps its grey.
-    if len(row) < 3 or row[0].data not in (BULLET, " ") or row[0].fg in BULLET_FGS:
-        return None
-    if (row[1].data or " ").strip() or not (row[2].data or " ").isalpha():
+    and the words are a sentence, not a call like "Bash(ls)". A finished row
+    has lost its "●"; with nothing in the gutter to go by, all of it must be
+    grey and not look like code."""
+    if len(row) < 3 or (row[1].data or " ").strip() or not (row[2].data or " ").isalpha():
         return None
     rest = _text(row[2:]).strip()
+    # With the bullet blinked off, the blank cell keeps its grey.
+    if row[0].data in (BULLET, " ") and row[0].fg not in BULLET_FGS:
+        pass
+    elif (row[0].data != " " or _looks_like_code(rest)
+          or any(c.bg != "default" for c in row)
+          or any(not _fg_matches(c.fg, ACTIVITY_FG) for c in row[2:] if (c.data or " ").strip())):
+        return None
     if (TOOL_CALL.match(rest) or "(" in rest.split(" ", 1)[0] or "   " in rest
             or MONO_CHARS.search(rest) or LOGO_CHARS.search(rest)):
         return None

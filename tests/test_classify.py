@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pyte
 
-from typesetter.classify import classify, mask_overlay
+from typesetter.classify import _fg_matches, _to_256, classify, mask_overlay
 from typesetter.terminal import Screen, Stream
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -545,4 +545,98 @@ def test_running_tool_activity_row_is_serif_while_blinking():
         assert row == {"kind": "prose", "gutter": 2, "join": False, "fixed": True}, bullet
         assert k["⎿  $ sleep 4"]["kind"] == "mono"
         assert k["● Bash(ls)"]["kind"] == "mono"
-        assert k["Listed 1 directory, ran 2 shell commands"]["kind"] == "mono"
+
+
+def test_finished_tool_activity_row_is_serif():
+    # Once a tool finishes the row loses its "●"; the rest is one grey, in
+    # truecolor or 256 colours. Colours from a 2.1.316 capture.
+    for grey in ("153;153;153", "148;148;148"):
+        row = "  \x1b[38;2;" + grey + "m{}\x1b[39m"
+        k = kinds(["● Done.", "", row.format("Read 1 file, ran 1 shell command"), "",
+                   row.format("Bash(ls)"), "", row.format("ls -la somewhere"), "",
+                   "  plain words, not grey"])
+        assert k["Read 1 file, ran 1 shell command"] == {
+            "kind": "prose", "gutter": 2, "join": False, "fixed": True}
+        assert k["Bash(ls)"]["kind"] == "mono"
+        assert k["ls -la somewhere"]["kind"] == "mono"
+
+
+CODE = "\x1b[38;2;177;185;249m{}\x1b[39m"
+CYAN = "\x1b[36m{}\x1b[39m"
+
+
+def test_code_nested_in_a_list_keeps_the_list_prose():
+    # Layout from a 2.1.316 capture: no blank rows, and the code is at the
+    # base indent, with or without a language.
+    k = kinds([
+        "● What would you like to do?",
+        "  - Run it: I'll send the same command again.",
+        "  - Do it yourself: run this on the host:",
+        "  " + CYAN.format("pct") + " set 105 " + CYAN.format("--nameserver") + " 1.1.1.1",
+        "  pct reboot 105",
+        "  - Or plain code:",
+        "  " + CODE.format("IN ACCEPT -p udp"),
+        "  - Change something: tell me.",
+    ])
+    for row in ("● What would you like to do?",
+                "- Run it: I'll send the same command again.",
+                "- Do it yourself: run this on the host:",
+                "- Or plain code:",
+                "- Change something: tell me."):
+        assert k[row]["kind"] == "prose", row
+    assert k["- Change something: tell me."]["gutter"] == 4
+    # Including an all-default row, which has no colour to give it away.
+    for row in ("pct set 105 --nameserver 1.1.1.1", "pct reboot 105", "IN ACCEPT -p udp"):
+        assert k[row]["kind"] == "mono", row
+
+
+def test_wrapped_item_before_nested_code_still_joins():
+    k = kinds([
+        "  1. Use a public DNS server, which is long enough that this row wraps right at the far edge",
+        "     terminal.",
+        "  2. Allow DNS to the router:",
+        "  " + CODE.format("IN ACCEPT"),
+    ], cols=100)
+    assert k["terminal."]["join"] is True
+    assert k["2. Allow DNS to the router:"]["kind"] == "prose"
+    assert k["IN ACCEPT"]["kind"] == "mono"
+
+
+def test_code_blocks_are_still_all_or_nothing():
+    # Separate from any list, one coloured row keeps a whole block mono.
+    k = kinds(["● Run:", "", "  foo bar", "  " + CYAN.format("baz") + " qux", "  more words"])
+    for row in ("foo bar", "baz qux", "more words"):
+        assert k[row]["kind"] == "mono", row
+    # So does a marker row that is itself code, as in highlighted YAML.
+    k = kinds(["● Run:", "", "  - foo", "  - " + CYAN.format("bar") + ": 1"])
+    assert k["- foo"]["kind"] == "mono"
+
+
+def test_inline_code_in_256_colours_is_prose():
+    # Under tmux Claude Code can be limited to 256 colours.
+    k = kinds(["● Call \x1b[38;5;153mfoo()\x1b[39m to run it."])
+    assert k["● Call foo() to run it."]["kind"] == "prose"
+
+
+def test_to_256_reproduces_the_downgrades_seen_in_captures():
+    for truecolor, downgraded in (("b1b9f9", "afd7ff"), ("d77757", "d78787"),
+                                  ("999999", "949494"), ("888888", "808080")):
+        assert _to_256(truecolor) == _to_256(downgraded), truecolor
+    # af87ff becomes afafff too, but it's also a palette colour in its own
+    # right, and a hex value can't say which it is. It stays itself.
+    assert _to_256("af87ff") != _to_256("afafff")
+    assert not _fg_matches("af87ff", "b1b9f9")
+
+
+def test_normalized_colours_are_a_fallback_for_the_same_palette_entry():
+    assert _fg_matches("b1b9f9", "b1b9f9")
+    assert _fg_matches("afd7ff", "b1b9f9")
+    assert _fg_matches("949494", "999999")
+    # The "accept edits" purple is close to inline code, but a different entry.
+    assert not _fg_matches("afafff", "b1b9f9")
+    # A palette colour is itself, even where the rounding would move it.
+    assert not _fg_matches("87d7ff", "b1b9f9")
+    # Named colours have no palette entry here.
+    assert not _fg_matches("cyan", "b1b9f9")
+    # The cost of the fallback: other truecolor colours share the entry.
+    assert _fg_matches("87ceeb", "b1b9f9")

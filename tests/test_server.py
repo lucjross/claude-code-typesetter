@@ -15,7 +15,7 @@ from types import SimpleNamespace
 import aiohttp
 import pytest
 
-from typesetter.server import print_exit_text
+from typesetter.server import child_env, print_exit_text
 
 ROOT = Path(__file__).resolve().parent.parent
 FAKE = Path(__file__).resolve().parent / "fake_claude.py"
@@ -168,3 +168,10 @@ def test_exit_hint_for_worktree_resume(capsys, command, hint):
     session = SimpleNamespace(exit_text=lambda color: f"Resume this session with:\n{command}")
     print_exit_text(session)
     assert capsys.readouterr().out.endswith(f"Or in typeset-claude:\n{hint}\n")
+
+
+def test_claude_keeps_truecolor_inside_tmux(monkeypatch):
+    monkeypatch.setenv("TMUX", "/tmp/tmux-1000/default,1,0")
+    env = child_env()
+    assert env["CLAUDE_CODE_TMUX_TRUECOLOR"] == "1"
+    assert env["TMUX"]  # tools run inside Claude Code can still use tmux
